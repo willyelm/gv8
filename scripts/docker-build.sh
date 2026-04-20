@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the bundled archives for a Linux target inside Docker.
+# Build the bundled runtime for a Linux target inside Docker.
 # Usage: scripts/docker-build.sh linux/amd64|linux/arm64
 #
 # Prerequisites:
@@ -35,7 +35,7 @@ esac
 echo "building Docker image ${IMAGE}..."
 docker build --platform "${DOCKER_PLATFORM}" -t "${IMAGE}" "${ROOT}/scripts/docker"
 
-echo "building V8 archives for ${PLATFORM}..."
+echo "building V8 runtime for ${PLATFORM}..."
 docker run --rm \
   --platform "${DOCKER_PLATFORM}" \
   -v "${ROOT}:/workspace" \

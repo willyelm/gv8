@@ -36,7 +36,7 @@ Planned next:
 ## Status
 
 This repository vendors V8 headers and version metadata under `internal/v8`.
-Native archives are built locally or downloaded as release assets.
+Native runtimes are committed in-module per supported platform.
 
 ## Maintainer
 
@@ -72,7 +72,7 @@ println(value.Integer())
 gv8/
   *.go              public API
   gv8.h             bridge API shared with cgo
-  internal/v8/      bundled V8 headers, archives, VERSION pin
+  internal/v8/      bundled V8 headers, runtimes, VERSION pin
   internal/gv8.cc   native bridge built with V8 toolchain
   scripts/          maintainer scripts
   Makefile          thin convenience wrapper
@@ -86,7 +86,6 @@ The maintainer flow stays explicit:
 - `make build`
 - `make build-linux-x64`
 - `make build-linux-arm64`
-- `make release`
 
 `internal/v8/VERSION` is the single source of truth for the bundled V8 version.
 To change V8, update that file and then run:
@@ -102,7 +101,7 @@ for example:
 - `.v8/workspaces/linux_x86_64`
 - `.v8/workspaces/linux_arm64`
 
-Each platform ends up with one installed native archive:
+Each platform ends up with one native runtime:
 
 - `internal/v8/darwin_arm64/libgv8.dylib`
 - `internal/v8/linux_x86_64/libgv8.so`
@@ -121,34 +120,11 @@ script creates or reuses the target workspace, installs `depot_tools`, runs
 runtime for the target platform. When ICU data is built as an external file,
 the build also installs `icudtl.dat` beside the shared library.
 
-To use a prebuilt release asset instead of building locally:
+Current default builds keep key platform features enabled:
 
-- `make install-v8`
+- `Intl.*` enabled
+- `Temporal` enabled
+- sandbox enabled
 
-The installer downloads the matching platform tarball from the GitHub Release
-tag `v8-<VERSION>` and extracts the platform runtime into
-`internal/v8/<target>/`.
-
-Release asset names follow this format:
-
-- `gv8-v8-<VERSION>-darwin_arm64.tar.gz`
-- `gv8-v8-<VERSION>-linux_x86_64.tar.gz`
-- `gv8-v8-<VERSION>-linux_arm64.tar.gz`
-
-`make release` packages every already-built platform archive into `dist/` so
-you can upload all three assets to a single GitHub Release tagged `v8-<VERSION>`.
-
-The release flow is:
-
-1. build each supported platform
-2. run `make release`
-3. create or update the GitHub Release tagged `v8-<VERSION>`
-4. upload the three files from `dist/`
-
-Current default builds keep optional features off:
-
-- `Intl.*` disabled
-- `Temporal` disabled
-
-That keeps the shipped archives small enough for normal Git storage and keeps
-the build close to V8's normal public build flow.
+The repository ships the built runtimes directly so downstream Go builds do not
+need a separate native install step.
