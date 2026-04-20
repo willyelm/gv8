@@ -1,0 +1,33 @@
+package gv8
+
+// #include <stdlib.h>
+// #include "gv8.h"
+import "C"
+
+import "unsafe"
+
+func valueResult(ctx *Context, rtn C.GV8RtnValue) (*Value, error) {
+	if rtn.value == nil {
+		return nil, newJSError(rtn.error)
+	}
+	return &Value{ptr: rtn.value, ctx: ctx}, nil
+}
+
+func newJSError(rtn C.GV8RtnError) error {
+	if rtn.msg == nil {
+		return nil
+	}
+	err := &JSError{
+		Message: C.GoString(rtn.msg),
+	}
+	if rtn.location != nil {
+		err.Location = C.GoString(rtn.location)
+	}
+	if rtn.stack != nil {
+		err.Stack = C.GoString(rtn.stack)
+	}
+	C.free(unsafe.Pointer(rtn.msg))
+	C.free(unsafe.Pointer(rtn.location))
+	C.free(unsafe.Pointer(rtn.stack))
+	return err
+}

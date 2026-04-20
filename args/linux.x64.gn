@@ -1,0 +1,24 @@
+target_cpu="x64"
+v8_target_cpu="x64"
+
+is_debug=false
+is_component_build=false
+v8_monolithic=true
+v8_monolithic_for_shared_library=true
+v8_use_external_startup_data=false
+use_custom_libcxx=true
+use_sysroot=false
+enable_rust=true
+
+# Must match CGO flags: -DV8_COMPRESS_POINTERS -DV8_31BIT_SMIS_ON_64BIT_ARCH -DV8_ENABLE_SANDBOX
+v8_enable_pointer_compression=true
+v8_enable_31bit_smis_on_64bit_arch=true
+v8_enable_sandbox=true
+
+v8_enable_i18n_support=true
+v8_enable_temporal_support=true
+v8_enable_gdbjit=false
+v8_enable_test_features=false
+treat_warnings_as_errors=false
+symbol_level=0
+strip_debug_info=true

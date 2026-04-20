@@ -1,0 +1,12 @@
+.DS_Store
+.v8/
+dist/
+internal/v8/darwin_arm64/*.a
+internal/v8/darwin_arm64/*.dylib
+internal/v8/darwin_arm64/*.dat
+internal/v8/linux_x86_64/*.a
+internal/v8/linux_x86_64/*.so
+internal/v8/linux_x86_64/*.dat
+internal/v8/linux_arm64/*.a
+internal/v8/linux_arm64/*.so
+internal/v8/linux_arm64/*.dat
