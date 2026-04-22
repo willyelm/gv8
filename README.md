@@ -1,46 +1,28 @@
 # gv8
 
-`gv8` is a small Go embedding toolkit for V8.
+`gv8` is a small Go binding for embedding V8.
 
-The design goal is to stay close to V8's design model:
-
-- `Isolate` and `Context` ownership
-- Script and module compilation
-- Module instantiation and evaluation
-- Module namespace exports from Go
-- Minimal V8 API parity
-
-This version keeps the API intentionally small:
+The project stays close to V8's model instead of adding a large Go-specific
+runtime layer. The core API is built around:
 
 - `Isolate`
 - `Context`
 - `UnboundScript`
 - `Module`
-- `Value` / `Object`
+- `Value` / `Object` / `Function` / `Promise`
 - `ModuleResolver`
 - `JSError`
 
-Implemented in this bootstrap:
+Current support includes:
 
-- unbound script compilation and execution
-- ESM compilation, instantiation, evaluation, and namespace export access
+- script compilation and execution
+- ESM compilation, instantiation, evaluation, and namespace access
 - resolver-driven module loading
-- explicit context ownership and microtask checkpoints
-
-Planned next:
-
-- host functions and host-owned values
-- dynamic import hooks
-- snapshots
-
-## Status
-
-This repository vendors V8 headers and version metadata under `internal/v8`.
-Native runtimes are committed in-module per supported platform.
-
-## Maintainer
-
-Will Medina <williams.medinaa@gmail.com>
+- dynamic import callbacks
+- host functions
+- object/property helpers
+- JSON helpers
+- promise resolution and awaiting
 
 ## Example
 
@@ -51,14 +33,7 @@ defer iso.Dispose()
 ctx := gv8.NewContext(iso)
 defer ctx.Close()
 
-script, err := iso.CompileUnboundScript("40 + 2", gv8.ScriptOrigin{
-	ResourceName: "example.js",
-})
-if err != nil {
-	panic(err)
-}
-
-value, err := script.Run(ctx)
+value, err := ctx.RunScript("40 + 2", "example.js")
 if err != nil {
 	panic(err)
 }
@@ -66,65 +41,33 @@ if err != nil {
 println(value.Integer())
 ```
 
-## Layout
+## Bundled Runtime
 
-```text
-gv8/
-  *.go              public API
-  gv8.h             bridge API shared with cgo
-  internal/v8/      bundled V8 headers, runtimes, VERSION pin
-  internal/gv8.cc   native bridge built with V8 toolchain
-  scripts/          maintainer scripts
-  Makefile          thin convenience wrapper
-```
+`gv8` vendors V8 headers, version metadata, and prebuilt runtimes in-module.
+The supported targets are:
+
+- `darwin/arm64`
+- `linux/amd64`
+- `linux/arm64`
+
+Each target ships one runtime:
+
+- `internal/v8/darwin_arm64/libgv8.dylib`
+- `internal/v8/linux_x86_64/libgv8.so`
+- `internal/v8/linux_arm64/libgv8.so`
 
 ## Maintenance
 
-The maintainer flow stays explicit:
+`internal/v8/VERSION` is the single source of truth for the bundled V8 version.
+
+Maintainer flow:
 
 - `make fetch`
 - `make build`
 - `make build-linux-x64`
 - `make build-linux-arm64`
 
-`internal/v8/VERSION` is the single source of truth for the bundled V8 version.
-To change V8, update that file and then run:
+`make fetch` updates the pinned V8 source.
 
-- `make fetch`
-
-Fetched source lives in `.v8/src/v8`.
-
-Each target build uses its own isolated workspace under `.v8/workspaces/`,
-for example:
-
-- `.v8/workspaces/darwin_arm64`
-- `.v8/workspaces/linux_x86_64`
-- `.v8/workspaces/linux_arm64`
-
-Each platform ends up with one native runtime:
-
-- `internal/v8/darwin_arm64/libgv8.dylib`
-- `internal/v8/linux_x86_64/libgv8.so`
-- `internal/v8/linux_arm64/libgv8.so`
-
-The fetch step is a source-only fast path:
-
-1. clone `v8.git`
-2. `git checkout --detach <VERSION>`
-3. copy `include/` and version metadata into `internal/v8/`
-
-The build step stays minimal and target-scoped. During `make build`, the
-script creates or reuses the target workspace, installs `depot_tools`, runs
-`gclient sync`, builds `v8_monolith` and `v8_libplatform`, compiles the small
-`gv8` bridge with the same V8 toolchain, and links a single shared `libgv8`
-runtime for the target platform. When ICU data is built as an external file,
-the build also installs `icudtl.dat` beside the shared library.
-
-Current default builds keep key platform features enabled:
-
-- `Intl.*` enabled
-- `Temporal` enabled
-- sandbox enabled
-
-The repository ships the built runtimes directly so downstream Go builds do not
-need a separate native install step.
+The build targets reuse isolated workspaces under `.v8/workspaces/` and produce
+the bundled runtimes committed under `internal/v8/`.
