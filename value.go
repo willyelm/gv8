@@ -39,6 +39,91 @@ func (v *Value) Integer() int64 {
 	return int64(C.GV8ValueToInteger(v.ptr))
 }
 
+func (v *Value) Boolean() bool {
+	return C.GV8ValueToBoolean(v.ptr) != 0
+}
+
+func (v *Value) IsObject() bool {
+	return C.GV8ValueIsObject(v.ptr) != 0
+}
+
+func (v *Value) IsString() bool {
+	return C.GV8ValueIsString(v.ptr) != 0
+}
+
+func (v *Value) IsBoolean() bool {
+	return C.GV8ValueIsBoolean(v.ptr) != 0
+}
+
+func (v *Value) IsUndefined() bool {
+	return C.GV8ValueIsUndefined(v.ptr) != 0
+}
+
+func (v *Value) IsNull() bool {
+	return C.GV8ValueIsNull(v.ptr) != 0
+}
+
+func (v *Value) IsPromise() bool {
+	return C.GV8ValueIsPromise(v.ptr) != 0
+}
+
+func (v *Value) IsFunction() bool {
+	return C.GV8ValueIsFunction(v.ptr) != 0
+}
+
+func (v *Value) IsArrayBuffer() bool {
+	return C.GV8ValueIsArrayBuffer(v.ptr) != 0
+}
+
+func (v *Value) IsArrayBufferView() bool {
+	return C.GV8ValueIsArrayBufferView(v.ptr) != 0
+}
+
+func (v *Value) IsUint8Array() bool {
+	return C.GV8ValueIsUint8Array(v.ptr) != 0
+}
+
+func (v *Value) IsInt8Array() bool {
+	return C.GV8ValueIsInt8Array(v.ptr) != 0
+}
+
+func (v *Value) IsUint8ClampedArray() bool {
+	return C.GV8ValueIsUint8ClampedArray(v.ptr) != 0
+}
+
+func (v *Value) Bytes() ([]byte, error) {
+	rtn := C.GV8ValueBytes(v.ptr)
+	if rtn.error.msg != nil {
+		return nil, newJSError(rtn.error)
+	}
+	if rtn.data == nil || rtn.length == 0 {
+		return nil, nil
+	}
+	defer C.free(unsafe.Pointer(rtn.data))
+	return C.GoBytes(unsafe.Pointer(rtn.data), C.int(rtn.length)), nil
+}
+
+func (v *Value) Object() *Object {
+	if v == nil || !v.IsObject() {
+		return nil
+	}
+	return &Object{Value: v}
+}
+
+func (v *Value) Function() *Function {
+	if v == nil || !v.IsFunction() {
+		return nil
+	}
+	return &Function{Object: &Object{Value: v}}
+}
+
+func (v *Value) Promise() *Promise {
+	if v == nil || !v.IsPromise() {
+		return nil
+	}
+	return &Promise{Value: v}
+}
+
 type Object struct {
 	*Value
 }
@@ -49,4 +134,71 @@ func (o *Object) Get(name string) (*Value, error) {
 
 	rtn := C.GV8ObjectGet(o.ptr, cname)
 	return valueResult(o.ctx, rtn)
+}
+
+func (o *Object) GetIdx(index uint32) (*Value, error) {
+	rtn := C.GV8ObjectGetIdx(o.ptr, C.uint32_t(index))
+	return valueResult(o.ctx, rtn)
+}
+
+func (o *Object) Set(name string, value any) error {
+	prop, cleanup, err := materializeValue(o.ctx, value)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return err
+	}
+
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+	return newJSError(C.GV8ObjectSet(o.ptr, cname, prop.ptr))
+}
+
+func (o *Object) CallMethod(name string, args ...any) (*Value, error) {
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+
+	argv, cleanup, err := materializeArgs(o.ctx, args)
+	defer cleanup()
+	if err != nil {
+		return nil, err
+	}
+	cargv, freeArgv := cArgv(argv)
+	defer freeArgv()
+
+	rtn := C.GV8ObjectCallMethod(o.ptr, cname, C.int(len(argv)), cargv)
+	return valueResult(o.ctx, rtn)
+}
+
+type Function struct {
+	*Object
+}
+
+func (f *Function) Call(recv *Object, args ...any) (*Value, error) {
+	argv, cleanup, err := materializeArgs(f.ctx, args)
+	defer cleanup()
+	if err != nil {
+		return nil, err
+	}
+	cargv, freeArgv := cArgv(argv)
+	defer freeArgv()
+	rtn := C.GV8ValueCall(f.ptr, recv.ptr, C.int(len(argv)), cargv)
+	return valueResult(f.ctx, rtn)
+}
+
+func JSONStringify(ctx *Context, value *Value) (string, error) {
+	rtn := C.GV8JSONStringify(ctx.ptr, value.ptr)
+	if rtn.error.msg != nil {
+		return "", newJSError(rtn.error)
+	}
+	defer C.free(unsafe.Pointer(rtn.data))
+	return C.GoStringN(rtn.data, rtn.length), nil
+}
+
+func JSONParse(ctx *Context, value string) (*Value, error) {
+	cvalue := C.CString(value)
+	defer C.free(unsafe.Pointer(cvalue))
+	rtn := C.GV8JSONParse(ctx.ptr, cvalue, C.int(len(value)))
+	return valueResult(ctx, rtn)
 }
