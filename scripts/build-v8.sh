@@ -321,14 +321,20 @@ while i < len(tokens):
         if token.startswith("--target="):
             result.append(token)
         elif token == "-isysroot" and i + 1 < len(tokens):
-            result.extend([token, normalize_path(tokens[i + 1])])
+            if "darwin" in sys.argv[1]:
+                result.extend([token, tokens[i + 1]])
+            else:
+                result.extend([token, normalize_path(tokens[i + 1])])
             i += 1
         elif token.startswith("-mmacos-version-min="):
             result.append(token)
         elif token.startswith("--sysroot="):
             result.append("--sysroot=" + normalize_path(token.split("=", 1)[1]))
         elif token == "-resource-dir" and i + 1 < len(tokens):
-            result.extend([token, normalize_path(tokens[i + 1])])
+            if "darwin" in sys.argv[1]:
+                result.extend([token, tokens[i + 1]])
+            else:
+                result.extend([token, normalize_path(tokens[i + 1])])
             i += 1
         elif token.startswith("-fuse-ld="):
             result.append(token)
