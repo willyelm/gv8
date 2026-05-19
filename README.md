@@ -59,6 +59,21 @@ context-global resolver.
 - Multiple independent module graphs can coexist in one context without
   overwriting each other's resolver state.
 
+## Execution Control
+
+`gv8` exposes the minimum isolate controls needed for a server runtime:
+
+- `TerminateExecution()` to stop runaway JavaScript
+- `CancelTerminateExecution()` to resume execution capability after handling a
+  termination event
+- `IsExecutionTerminating()` to inspect termination state
+- `TerminateOnContextDone(ctx)` to connect isolate termination to host
+  cancellation or deadlines
+- `HeapStatistics()` for basic memory reporting
+- `LowMemoryNotification()` and `MemoryPressureNotification(...)` for heap
+  pressure signaling
+- `NewIsolateWithOptions(...)` to configure initial and maximum heap sizes
+
 ## Threading
 
 `gv8` uses an externally synchronized isolate model.

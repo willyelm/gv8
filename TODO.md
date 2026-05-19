@@ -33,10 +33,10 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Bind resolver state to a module graph or evaluation session.
 - [x] Add tests for interleaved and concurrent module loading.
 
-[ ] 7. Add execution control primitives
-- [ ] Support execution termination and timeouts per isolate.
-- [ ] Support memory limits and basic heap pressure reporting.
-- [ ] Expose the minimum controls needed to kill runaway code.
+[x] 7. Add execution control primitives
+- [x] Support execution termination and timeouts per isolate.
+- [x] Support memory limits and basic heap pressure reporting.
+- [x] Expose the minimum controls needed to kill runaway code.
 
 [ ] 8. Add observability
 - [ ] Expose V8 version, heap stats, and basic counters.
