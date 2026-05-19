@@ -47,17 +47,22 @@ func (v *Value) Release() {
 }
 
 func (v *Value) String() string {
+	value, _ := v.StringValue()
+	return value
+}
+
+func (v *Value) StringValue() (string, error) {
 	if !v.valid() {
-		return ""
+		return "", &JSError{Message: "gv8: value is no longer valid"}
 	}
 	release := v.ctx.iso.mustEnter()
 	defer release()
 	rtn := C.GV8ValueToString(v.ptr)
 	if rtn.error.msg != nil {
-		panic(newJSError(rtn.error))
+		return "", newJSError(rtn.error)
 	}
 	defer C.free(unsafe.Pointer(rtn.data))
-	return C.GoStringN(rtn.data, rtn.length)
+	return C.GoStringN(rtn.data, rtn.length), nil
 }
 
 func (v *Value) Integer() int64 {

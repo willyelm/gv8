@@ -782,6 +782,43 @@ func TestPromiseAwait(t *testing.T) {
 	}
 }
 
+func TestPromiseAwaitRejectedReturnsJSError(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	resolver, err := gv8.NewPromiseResolver(ctx)
+	if err != nil {
+		t.Fatalf("new promise resolver: %v", err)
+	}
+	defer resolver.Release()
+
+	reason, err := gv8.NewStringValue(ctx, "boom")
+	if err != nil {
+		t.Fatalf("new string: %v", err)
+	}
+	defer reason.Release()
+
+	if err := resolver.Reject(reason); err != nil {
+		t.Fatalf("reject promise: %v", err)
+	}
+
+	_, err = resolver.Promise().Await(context.Background(), nil)
+	if err == nil {
+		t.Fatalf("expected promise rejection")
+	}
+
+	var jsErr *gv8.JSError
+	if !errors.As(err, &jsErr) {
+		t.Fatalf("expected JSError, got %T", err)
+	}
+	if jsErr.Message != "promise rejected: boom" {
+		t.Fatalf("unexpected rejection message: %q", jsErr.Message)
+	}
+}
+
 func TestJSONHelpers(t *testing.T) {
 	iso := gv8.NewIsolate()
 	defer iso.Dispose()
@@ -818,6 +855,35 @@ func TestJSONHelpers(t *testing.T) {
 			t.Fatalf("stringify missing %s in %s", want, json)
 		}
 	}
+}
+
+func TestValueStringValueReturnsJSError(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+
+	value, err := ctx.RunScript(`"ok"`, "string-value.js")
+	if err != nil {
+		t.Fatalf("run script: %v", err)
+	}
+
+	ctx.Close()
+
+	if _, err := value.StringValue(); err == nil {
+		t.Fatalf("expected string conversion error")
+	} else {
+		var jsErr *gv8.JSError
+		if !errors.As(err, &jsErr) {
+			t.Fatalf("expected JSError, got %T", err)
+		}
+	}
+
+	if got := value.String(); got != "" {
+		t.Fatalf("expected empty string fallback, got %q", got)
+	}
+
+	value.Release()
 }
 
 func TestTypedArrayBytes(t *testing.T) {

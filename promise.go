@@ -6,7 +6,6 @@ import "C"
 import (
 	"context"
 	"errors"
-	"fmt"
 )
 
 type PromiseState int
@@ -135,9 +134,13 @@ func (p *Promise) Await(ctx context.Context, pump func(context.Context) error) (
 	case PromiseRejected:
 		result := p.Result()
 		if result == nil {
-			return nil, errors.New("promise rejected")
+			return nil, &JSError{Message: "promise rejected"}
 		}
-		return nil, fmt.Errorf("promise rejected: %s", result.String())
+		message, err := result.StringValue()
+		if err != nil || message == "" {
+			return nil, &JSError{Message: "promise rejected"}
+		}
+		return nil, &JSError{Message: "promise rejected: " + message}
 	default:
 		return nil, errors.New("promise did not settle")
 	}
