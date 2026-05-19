@@ -23,6 +23,7 @@ type Context struct {
 
 	mu             sync.RWMutex
 	closed         bool
+	hostFnIDs      map[int]struct{}
 	liveValues     map[*Value]struct{}
 	moduleResolver ModuleResolver
 }
@@ -41,6 +42,7 @@ func NewContext(iso *Isolate) *Context {
 		ref:        ref,
 		ptr:        C.GV8NewContext(iso.ptr, C.int(ref)),
 		iso:        iso,
+		hostFnIDs:  map[int]struct{}{},
 		liveValues: map[*Value]struct{}{},
 	}
 	setContext(ctx)
@@ -76,20 +78,40 @@ func (c *Context) Close() {
 		return
 	}
 	c.closed = true
+	hostFnIDs := make([]int, 0, len(c.hostFnIDs))
+	for id := range c.hostFnIDs {
+		hostFnIDs = append(hostFnIDs, id)
+	}
 	liveValues := make([]*Value, 0, len(c.liveValues))
 	for value := range c.liveValues {
 		liveValues = append(liveValues, value)
 	}
+	c.hostFnIDs = nil
 	c.liveValues = nil
+	c.moduleResolver = nil
 	c.mu.Unlock()
 
 	for _, value := range liveValues {
 		value.invalidate()
 	}
+	unregisterHostFunctions(hostFnIDs)
 
 	deleteContext(c.ref)
 	C.GV8ContextDispose(c.ptr)
 	c.ptr = nil
+}
+
+func (c *Context) trackHostFunction(id int) {
+	if c == nil || id == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.hostFnIDs == nil {
+		unregisterHostFunctions([]int{id})
+		return
+	}
+	c.hostFnIDs[id] = struct{}{}
 }
 
 func (c *Context) trackValue(value *Value) {

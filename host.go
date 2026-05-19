@@ -44,6 +44,17 @@ func registerHostFunction(fn HostFunction) int {
 	return hostFnSeq
 }
 
+func unregisterHostFunctions(ids []int) {
+	if len(ids) == 0 {
+		return
+	}
+	hostFnMu.Lock()
+	defer hostFnMu.Unlock()
+	for _, id := range ids {
+		delete(hostFnRefs, id)
+	}
+}
+
 func lookupHostFunction(id int) HostFunction {
 	hostFnMu.RLock()
 	defer hostFnMu.RUnlock()
@@ -58,9 +69,12 @@ func NewFunction(ctx *Context, fn HostFunction) (*Function, error) {
 		return nil, fmt.Errorf("gv8: nil host function")
 	}
 
-	rtn := C.GV8ContextNewFunction(ctx.ptr, C.int(registerHostFunction(fn)))
+	callbackID := registerHostFunction(fn)
+	ctx.trackHostFunction(callbackID)
+	rtn := C.GV8ContextNewFunction(ctx.ptr, C.int(callbackID))
 	value, err := valueResult(ctx, rtn)
 	if err != nil {
+		unregisterHostFunctions([]int{callbackID})
 		return nil, err
 	}
 	return value.Function(), nil

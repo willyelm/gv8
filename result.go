@@ -10,7 +10,7 @@ func valueResult(ctx *Context, rtn C.GV8RtnValue) (*Value, error) {
 	if rtn.value == nil {
 		return nil, newJSError(rtn.error)
 	}
-	return &Value{ptr: rtn.value, ctx: ctx}, nil
+	return newValue(ctx, rtn.value), nil
 }
 
 func newJSError(rtn C.GV8RtnError) error {
