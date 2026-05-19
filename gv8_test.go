@@ -82,6 +82,7 @@ func TestCompileUnboundScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile script: %v", err)
 	}
+	defer script.Release()
 
 	value, err := script.Run(ctx)
 	if err != nil {
@@ -126,6 +127,7 @@ func TestModuleNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile module: %v", err)
 	}
+	defer mod.Release()
 
 	if err := mod.Instantiate(ctx, nil); err != nil {
 		t.Fatalf("instantiate module: %v", err)
@@ -174,6 +176,7 @@ func TestModuleResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile module: %v", err)
 	}
+	defer mod.Release()
 
 	if err := mod.Instantiate(ctx, resolver); err != nil {
 		t.Fatalf("instantiate module: %v", err)
@@ -221,6 +224,7 @@ func TestDynamicImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile module: %v", err)
 	}
+	defer mod.Release()
 
 	if got := mod.Status(); got != gv8.ModuleStatusUninstantiated {
 		t.Fatalf("unexpected initial status: %v", got)
@@ -294,6 +298,7 @@ func TestModuleReadyNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile module: %v", err)
 	}
+	defer mod.Release()
 
 	namespace, err := mod.ReadyNamespace(ctx, resolver, nil)
 	if err != nil {
@@ -308,6 +313,89 @@ func TestModuleReadyNamespace(t *testing.T) {
 
 	if got := exported.Integer(); got != 42 {
 		t.Fatalf("unexpected export: got %d want 42", got)
+	}
+}
+
+func TestScriptRunAfterRelease(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	script, err := iso.CompileUnboundScript("40 + 2", gv8.ScriptOrigin{
+		ResourceName: "release.js",
+	})
+	if err != nil {
+		t.Fatalf("compile script: %v", err)
+	}
+
+	script.Release()
+	script.Release()
+
+	if _, err := script.Run(ctx); err == nil {
+		t.Fatalf("expected error running released script")
+	}
+}
+
+func TestModuleRelease(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	mod, err := iso.CompileModule("export const answer = 42;", gv8.ScriptOrigin{
+		ResourceName: "release-module.js",
+		IsModule:     true,
+	})
+	if err != nil {
+		t.Fatalf("compile module: %v", err)
+	}
+
+	mod.Release()
+	mod.Release()
+
+	if got := mod.Status(); got != gv8.ModuleStatusUninstantiated {
+		t.Fatalf("unexpected status after release: %v", got)
+	}
+}
+
+func TestContextCloseInvalidatesValues(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+
+	value, err := ctx.RunScript(`({ answer: 42 })`, "close.js")
+	if err != nil {
+		t.Fatalf("run script: %v", err)
+	}
+
+	object := value.Object()
+	ctx.Close()
+
+	if got := value.Integer(); got != 0 {
+		t.Fatalf("unexpected integer after close: %d", got)
+	}
+
+	if _, err := object.Get("answer"); err == nil {
+		t.Fatalf("expected object get error after context close")
+	}
+
+	value.Release()
+}
+
+func TestContextClosePreventsNewWork(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	ctx.Close()
+
+	if _, err := ctx.RunScript("40 + 2", "closed.js"); err == nil {
+		t.Fatalf("expected run script error on closed context")
+	}
+
+	if _, err := ctx.NewObject(); err == nil {
+		t.Fatalf("expected new object error on closed context")
 	}
 }
 

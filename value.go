@@ -15,18 +15,39 @@ func newValue(ctx *Context, ptr C.GV8ValuePtr) *Value {
 	if ptr == nil {
 		return nil
 	}
-	return &Value{ptr: ptr, ctx: ctx}
+	value := &Value{ptr: ptr, ctx: ctx}
+	if ctx != nil {
+		ctx.trackValue(value)
+	}
+	return value
+}
+
+func (v *Value) invalidate() {
+	if v == nil {
+		return
+	}
+	v.ptr = nil
+}
+
+func (v *Value) valid() bool {
+	return v != nil && v.ptr != nil && (v.ctx == nil || !v.ctx.isClosed())
 }
 
 func (v *Value) Release() {
 	if v == nil || v.ptr == nil {
 		return
 	}
+	if v.ctx != nil {
+		v.ctx.untrackValue(v)
+	}
 	C.GV8ValueRelease(v.ptr)
 	v.ptr = nil
 }
 
 func (v *Value) String() string {
+	if !v.valid() {
+		return ""
+	}
 	rtn := C.GV8ValueToString(v.ptr)
 	if rtn.error.msg != nil {
 		panic(newJSError(rtn.error))
@@ -36,62 +57,107 @@ func (v *Value) String() string {
 }
 
 func (v *Value) Integer() int64 {
+	if !v.valid() {
+		return 0
+	}
 	return int64(C.GV8ValueToInteger(v.ptr))
 }
 
 func (v *Value) Boolean() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueToBoolean(v.ptr) != 0
 }
 
 func (v *Value) IsObject() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsObject(v.ptr) != 0
 }
 
 func (v *Value) IsString() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsString(v.ptr) != 0
 }
 
 func (v *Value) IsBoolean() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsBoolean(v.ptr) != 0
 }
 
 func (v *Value) IsUndefined() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsUndefined(v.ptr) != 0
 }
 
 func (v *Value) IsNull() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsNull(v.ptr) != 0
 }
 
 func (v *Value) IsPromise() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsPromise(v.ptr) != 0
 }
 
 func (v *Value) IsFunction() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsFunction(v.ptr) != 0
 }
 
 func (v *Value) IsArrayBuffer() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsArrayBuffer(v.ptr) != 0
 }
 
 func (v *Value) IsArrayBufferView() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsArrayBufferView(v.ptr) != 0
 }
 
 func (v *Value) IsUint8Array() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsUint8Array(v.ptr) != 0
 }
 
 func (v *Value) IsInt8Array() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsInt8Array(v.ptr) != 0
 }
 
 func (v *Value) IsUint8ClampedArray() bool {
+	if !v.valid() {
+		return false
+	}
 	return C.GV8ValueIsUint8ClampedArray(v.ptr) != 0
 }
 
 func (v *Value) Bytes() ([]byte, error) {
+	if !v.valid() {
+		return nil, &JSError{Message: "gv8: value is no longer valid"}
+	}
 	rtn := C.GV8ValueBytes(v.ptr)
 	if rtn.error.msg != nil {
 		return nil, newJSError(rtn.error)
@@ -129,6 +195,9 @@ type Object struct {
 }
 
 func (o *Object) Get(name string) (*Value, error) {
+	if o == nil || !o.valid() {
+		return nil, &JSError{Message: "gv8: value is no longer valid"}
+	}
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
 
@@ -137,11 +206,17 @@ func (o *Object) Get(name string) (*Value, error) {
 }
 
 func (o *Object) GetIdx(index uint32) (*Value, error) {
+	if o == nil || !o.valid() {
+		return nil, &JSError{Message: "gv8: value is no longer valid"}
+	}
 	rtn := C.GV8ObjectGetIdx(o.ptr, C.uint32_t(index))
 	return valueResult(o.ctx, rtn)
 }
 
 func (o *Object) Set(name string, value any) error {
+	if o == nil || !o.valid() {
+		return &JSError{Message: "gv8: value is no longer valid"}
+	}
 	prop, cleanup, err := materializeValue(o.ctx, value)
 	if cleanup != nil {
 		defer cleanup()
@@ -156,6 +231,9 @@ func (o *Object) Set(name string, value any) error {
 }
 
 func (o *Object) CallMethod(name string, args ...any) (*Value, error) {
+	if o == nil || !o.valid() {
+		return nil, &JSError{Message: "gv8: value is no longer valid"}
+	}
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
 
@@ -176,6 +254,9 @@ type Function struct {
 }
 
 func (f *Function) Call(recv *Object, args ...any) (*Value, error) {
+	if f == nil || !f.valid() {
+		return nil, &JSError{Message: "gv8: value is no longer valid"}
+	}
 	argv, cleanup, err := materializeArgs(f.ctx, args)
 	defer cleanup()
 	if err != nil {
@@ -188,6 +269,12 @@ func (f *Function) Call(recv *Object, args ...any) (*Value, error) {
 }
 
 func JSONStringify(ctx *Context, value *Value) (string, error) {
+	if err := ctx.ensureOpen(); err != nil {
+		return "", err
+	}
+	if value == nil || !value.valid() {
+		return "", &JSError{Message: "gv8: value is no longer valid"}
+	}
 	rtn := C.GV8JSONStringify(ctx.ptr, value.ptr)
 	if rtn.error.msg != nil {
 		return "", newJSError(rtn.error)
@@ -197,6 +284,9 @@ func JSONStringify(ctx *Context, value *Value) (string, error) {
 }
 
 func JSONParse(ctx *Context, value string) (*Value, error) {
+	if err := ctx.ensureOpen(); err != nil {
+		return nil, err
+	}
 	cvalue := C.CString(value)
 	defer C.free(unsafe.Pointer(cvalue))
 	rtn := C.GV8JSONParse(ctx.ptr, cvalue, C.int(len(value)))

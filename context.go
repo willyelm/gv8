@@ -21,6 +21,9 @@ type Context struct {
 	ptr C.GV8ContextPtr
 	iso *Isolate
 
+	mu             sync.RWMutex
+	closed         bool
+	liveValues     map[*Value]struct{}
 	moduleResolver ModuleResolver
 }
 
@@ -35,9 +38,10 @@ func NewContext(iso *Isolate) *Context {
 	ctxMu.Unlock()
 
 	ctx := &Context{
-		ref: ref,
-		ptr: C.GV8NewContext(iso.ptr, C.int(ref)),
-		iso: iso,
+		ref:        ref,
+		ptr:        C.GV8NewContext(iso.ptr, C.int(ref)),
+		iso:        iso,
+		liveValues: map[*Value]struct{}{},
 	}
 	setContext(ctx)
 	return ctx
@@ -65,9 +69,71 @@ func (c *Context) Close() {
 	if c == nil || c.ptr == nil {
 		return
 	}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	liveValues := make([]*Value, 0, len(c.liveValues))
+	for value := range c.liveValues {
+		liveValues = append(liveValues, value)
+	}
+	c.liveValues = nil
+	c.mu.Unlock()
+
+	for _, value := range liveValues {
+		value.invalidate()
+	}
+
 	deleteContext(c.ref)
 	C.GV8ContextDispose(c.ptr)
 	c.ptr = nil
+}
+
+func (c *Context) trackValue(value *Value) {
+	if c == nil || value == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.liveValues == nil {
+		value.invalidate()
+		return
+	}
+	c.liveValues[value] = struct{}{}
+}
+
+func (c *Context) untrackValue(value *Value) {
+	if c == nil || value == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.liveValues == nil {
+		return
+	}
+	delete(c.liveValues, value)
+}
+
+func (c *Context) isClosed() bool {
+	if c == nil {
+		return true
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closed || c.ptr == nil
+}
+
+func (c *Context) ensureOpen() error {
+	if c == nil {
+		return fmt.Errorf("gv8: nil context")
+	}
+	if c.isClosed() {
+		return fmt.Errorf("gv8: context is closed")
+	}
+	return nil
 }
 
 func (c *Context) Isolate() *Isolate {
@@ -75,22 +141,34 @@ func (c *Context) Isolate() *Isolate {
 }
 
 func (c *Context) Global() *Object {
+	if c == nil || c.isClosed() {
+		return nil
+	}
 	return &Object{Value: newValue(c, C.GV8ContextGlobal(c.ptr))}
 }
 
 func (c *Context) GetGlobal(name string) (*Value, error) {
+	if err := c.ensureOpen(); err != nil {
+		return nil, err
+	}
 	global := c.Global()
 	defer global.Release()
 	return global.Get(name)
 }
 
 func (c *Context) SetGlobal(name string, value any) error {
+	if err := c.ensureOpen(); err != nil {
+		return err
+	}
 	global := c.Global()
 	defer global.Release()
 	return global.Set(name, value)
 }
 
 func (c *Context) SetGlobals(values map[string]any) error {
+	if err := c.ensureOpen(); err != nil {
+		return err
+	}
 	for name, value := range values {
 		if err := c.SetGlobal(name, value); err != nil {
 			return err
@@ -109,6 +187,9 @@ func (c *Context) Bind(name string, fn HostFunction) error {
 }
 
 func (c *Context) NewObject() (*Object, error) {
+	if err := c.ensureOpen(); err != nil {
+		return nil, err
+	}
 	rtn := C.GV8ContextNewObject(c.ptr)
 	value, err := valueResult(c, rtn)
 	if err != nil {
@@ -118,8 +199,8 @@ func (c *Context) NewObject() (*Object, error) {
 }
 
 func (c *Context) RunScript(source string, origin string) (*Value, error) {
-	if c == nil {
-		return nil, fmt.Errorf("gv8: nil context")
+	if err := c.ensureOpen(); err != nil {
+		return nil, err
 	}
 
 	csource := C.CString(source)

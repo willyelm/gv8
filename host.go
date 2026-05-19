@@ -51,8 +51,8 @@ func lookupHostFunction(id int) HostFunction {
 }
 
 func NewFunction(ctx *Context, fn HostFunction) (*Function, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("gv8: nil context")
+	if err := ctx.ensureOpen(); err != nil {
+		return nil, err
 	}
 	if fn == nil {
 		return nil, fmt.Errorf("gv8: nil host function")
