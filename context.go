@@ -21,11 +21,12 @@ type Context struct {
 	ptr C.GV8ContextPtr
 	iso *Isolate
 
-	mu             sync.RWMutex
-	closed         bool
-	hostFnIDs      map[int]struct{}
-	liveValues     map[*Value]struct{}
-	moduleResolver ModuleResolver
+	mu                      sync.RWMutex
+	closed                  bool
+	hostFnIDs               map[int]struct{}
+	liveValues              map[*Value]struct{}
+	moduleResolversByScript map[int]ModuleResolver
+	moduleResolversByName   map[string]ModuleResolver
 }
 
 func NewContext(iso *Isolate) *Context {
@@ -39,11 +40,13 @@ func NewContext(iso *Isolate) *Context {
 	ctxMu.Unlock()
 
 	ctx := &Context{
-		ref:        ref,
-		ptr:        C.GV8NewContext(iso.ptr, C.int(ref)),
-		iso:        iso,
-		hostFnIDs:  map[int]struct{}{},
-		liveValues: map[*Value]struct{}{},
+		ref:                     ref,
+		ptr:                     C.GV8NewContext(iso.ptr, C.int(ref)),
+		iso:                     iso,
+		hostFnIDs:               map[int]struct{}{},
+		liveValues:              map[*Value]struct{}{},
+		moduleResolversByScript: map[int]ModuleResolver{},
+		moduleResolversByName:   map[string]ModuleResolver{},
 	}
 	setContext(ctx)
 	return ctx
@@ -88,7 +91,8 @@ func (c *Context) Close() {
 	}
 	c.hostFnIDs = nil
 	c.liveValues = nil
-	c.moduleResolver = nil
+	c.moduleResolversByScript = nil
+	c.moduleResolversByName = nil
 	c.mu.Unlock()
 
 	for _, value := range liveValues {
@@ -99,6 +103,51 @@ func (c *Context) Close() {
 	deleteContext(c.ref)
 	C.GV8ContextDispose(c.ptr)
 	c.ptr = nil
+}
+
+func (c *Context) bindModuleResolver(module *Module, resolver ModuleResolver) {
+	if c == nil || module == nil || resolver == nil {
+		return
+	}
+
+	scriptID := module.ScriptID()
+	resourceName := module.ResourceName()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	if scriptID != 0 && c.moduleResolversByScript != nil {
+		c.moduleResolversByScript[scriptID] = resolver
+	}
+	if resourceName != "" && c.moduleResolversByName != nil {
+		c.moduleResolversByName[resourceName] = resolver
+	}
+}
+
+func (c *Context) moduleResolverForScript(scriptID int) ModuleResolver {
+	if c == nil || scriptID == 0 {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.moduleResolversByScript == nil {
+		return nil
+	}
+	return c.moduleResolversByScript[scriptID]
+}
+
+func (c *Context) moduleResolverForResource(resourceName string) ModuleResolver {
+	if c == nil || resourceName == "" {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.moduleResolversByName == nil {
+		return nil
+	}
+	return c.moduleResolversByName[resourceName]
 }
 
 func (c *Context) trackHostFunction(id int) {

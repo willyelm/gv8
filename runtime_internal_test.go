@@ -50,7 +50,8 @@ func TestContextCloseClearsRegistryAndResolver(t *testing.T) {
 	defer iso.Dispose()
 
 	ctx := NewContext(iso)
-	ctx.moduleResolver = testModuleResolver{}
+	ctx.moduleResolversByScript[1] = testModuleResolver{}
+	ctx.moduleResolversByName["main.js"] = testModuleResolver{}
 
 	if got := contextCount(); got != before+1 {
 		t.Fatalf("unexpected context count before close: got %d want %d", got, before+1)
@@ -61,8 +62,11 @@ func TestContextCloseClearsRegistryAndResolver(t *testing.T) {
 	if got := contextCount(); got != before {
 		t.Fatalf("unexpected context count after close: got %d want %d", got, before)
 	}
-	if ctx.moduleResolver != nil {
-		t.Fatalf("expected module resolver to be cleared on close")
+	if ctx.moduleResolversByScript != nil {
+		t.Fatalf("expected script resolver bindings to be cleared on close")
+	}
+	if ctx.moduleResolversByName != nil {
+		t.Fatalf("expected resource resolver bindings to be cleared on close")
 	}
 }
 

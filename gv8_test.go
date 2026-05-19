@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +70,38 @@ func (r *testResolver) ResolveDynamicImport(ctx *gv8.Context, specifier string, 
 		return nil, err
 	}
 	return resolver.Promise(), nil
+}
+
+type isolatedResolver struct {
+	value int
+	cache map[string]*gv8.Module
+}
+
+func (r *isolatedResolver) ResolveModule(ctx *gv8.Context, specifier string, _ *gv8.Module) (*gv8.Module, error) {
+	if r.cache == nil {
+		r.cache = map[string]*gv8.Module{}
+	}
+	if mod, ok := r.cache[specifier]; ok {
+		return mod, nil
+	}
+
+	mod, err := ctx.Isolate().CompileModule(
+		`export const answer = `+strconv.Itoa(r.value)+`;`,
+		gv8.ScriptOrigin{ResourceName: specifier, IsModule: true},
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.cache[specifier] = mod
+	return mod, nil
+}
+
+func (r *isolatedResolver) ResolveDynamicImport(ctx *gv8.Context, specifier string, resourceName string) (*gv8.Promise, error) {
+	base := testResolver{}
+	base.modules = map[string]string{
+		specifier: `export const answer = ` + strconv.Itoa(r.value) + `;`,
+	}
+	return base.ResolveDynamicImport(ctx, specifier, resourceName)
 }
 
 func TestCompileUnboundScript(t *testing.T) {
@@ -315,6 +348,123 @@ func TestModuleReadyNamespace(t *testing.T) {
 
 	if got := exported.Integer(); got != 42 {
 		t.Fatalf("unexpected export: got %d want 42", got)
+	}
+}
+
+func TestModuleResolverIsolationByReferrer(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	leftResolver := &isolatedResolver{value: 41}
+	rightResolver := &isolatedResolver{value: 99}
+
+	left, err := iso.CompileModule(`
+		import { answer } from "./dep.js";
+		export const value = answer + 1;
+	`, gv8.ScriptOrigin{ResourceName: "left.js", IsModule: true})
+	if err != nil {
+		t.Fatalf("compile left module: %v", err)
+	}
+	defer left.Release()
+
+	right, err := iso.CompileModule(`
+		import { answer } from "./dep.js";
+		export const value = answer + 1;
+	`, gv8.ScriptOrigin{ResourceName: "right.js", IsModule: true})
+	if err != nil {
+		t.Fatalf("compile right module: %v", err)
+	}
+	defer right.Release()
+
+	if err := left.Instantiate(ctx, leftResolver); err != nil {
+		t.Fatalf("instantiate left: %v", err)
+	}
+	if err := right.Instantiate(ctx, rightResolver); err != nil {
+		t.Fatalf("instantiate right: %v", err)
+	}
+
+	leftValue, err := left.ReadyNamespace(ctx, leftResolver, nil)
+	if err != nil {
+		t.Fatalf("left namespace: %v", err)
+	}
+	rightValue, err := right.ReadyNamespace(ctx, rightResolver, nil)
+	if err != nil {
+		t.Fatalf("right namespace: %v", err)
+	}
+
+	gotLeft, err := leftValue.Get("value")
+	if err != nil {
+		t.Fatalf("get left value: %v", err)
+	}
+	defer gotLeft.Release()
+	gotRight, err := rightValue.Get("value")
+	if err != nil {
+		t.Fatalf("get right value: %v", err)
+	}
+	defer gotRight.Release()
+
+	if got := gotLeft.Integer(); got != 42 {
+		t.Fatalf("unexpected left export: got %d want 42", got)
+	}
+	if got := gotRight.Integer(); got != 100 {
+		t.Fatalf("unexpected right export: got %d want 100", got)
+	}
+}
+
+func TestDynamicImportResolverIsolationByResourceName(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	leftResolver := &isolatedResolver{value: 41}
+	rightResolver := &isolatedResolver{value: 99}
+
+	left, err := iso.CompileModule(`
+		export const value = await import("./dep.js").then((mod) => mod.answer + 1);
+	`, gv8.ScriptOrigin{ResourceName: "left-dynamic.js", IsModule: true})
+	if err != nil {
+		t.Fatalf("compile left module: %v", err)
+	}
+	defer left.Release()
+
+	right, err := iso.CompileModule(`
+		export const value = await import("./dep.js").then((mod) => mod.answer + 1);
+	`, gv8.ScriptOrigin{ResourceName: "right-dynamic.js", IsModule: true})
+	if err != nil {
+		t.Fatalf("compile right module: %v", err)
+	}
+	defer right.Release()
+
+	leftNS, err := left.ReadyNamespace(ctx, leftResolver, nil)
+	if err != nil {
+		t.Fatalf("left namespace: %v", err)
+	}
+	rightNS, err := right.ReadyNamespace(ctx, rightResolver, nil)
+	if err != nil {
+		t.Fatalf("right namespace: %v", err)
+	}
+
+	gotLeft, err := leftNS.Get("value")
+	if err != nil {
+		t.Fatalf("get left value: %v", err)
+	}
+	defer gotLeft.Release()
+	gotRight, err := rightNS.Get("value")
+	if err != nil {
+		t.Fatalf("get right value: %v", err)
+	}
+	defer gotRight.Release()
+
+	if got := gotLeft.Integer(); got != 42 {
+		t.Fatalf("unexpected left export: got %d want 42", got)
+	}
+	if got := gotRight.Integer(); got != 100 {
+		t.Fatalf("unexpected right export: got %d want 100", got)
 	}
 }
 
