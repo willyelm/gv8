@@ -57,6 +57,23 @@ Current support includes:
 - JSON helpers
 - promise resolution and awaiting
 
+## Server Runtime Scope
+
+`gv8` is intentionally scoped to the minimum feature set needed for a
+server-side JavaScript host runtime.
+
+The supported core for that use case is:
+
+- stable host function callbacks
+- ESM loading with static and dynamic import
+- JSON parsing and stringification
+- byte access for `ArrayBuffer` and typed array views
+- promise resolution, awaiting, and explicit microtask pumping
+
+The project does not try to expose the full V8 embedder surface. Features like
+snapshots remain optional and out of scope unless startup latency requirements
+justify the added maintenance and API complexity.
+
 ## Error Handling
 
 `gv8` reports JavaScript exceptions as `JSError`.

@@ -47,12 +47,12 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Keep the surface focused on `Isolate`, `Context`, `Script`, `Module`, `Value`, `Function`, and `Promise`.
 - [x] Prefer explicit ownership over convenience APIs that hide lifecycle rules.
 
-[ ] 10. Support server-runtime essentials only
-- [ ] Stable host function callbacks.
-- [ ] ESM loading with static and dynamic import.
-- [ ] JSON and byte access.
-- [ ] Promise resolution and microtask pumping.
-- [ ] Optional snapshots only if startup latency justifies the complexity.
+[x] 10. Support server-runtime essentials only
+- [x] Stable host function callbacks.
+- [x] ESM loading with static and dynamic import.
+- [x] JSON and byte access.
+- [x] Promise resolution and microtask pumping.
+- [x] Optional snapshots only if startup latency justifies the complexity.
 
 [ ] 11. Improve test depth, not just breadth
 - [x] Add stress tests for repeated create/run/dispose cycles.
