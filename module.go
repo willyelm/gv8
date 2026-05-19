@@ -52,7 +52,21 @@ func compileModule(iso *Isolate, source string, origin ScriptOrigin) (*Module, e
 	return &Module{ptr: rtn.ptr, iso: iso}, nil
 }
 
+func (m *Module) Release() {
+	if m == nil || m.ptr == nil {
+		return
+	}
+	C.GV8ModuleRelease(m.ptr)
+	m.ptr = nil
+}
+
 func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
+	if m == nil || m.ptr == nil {
+		return &JSError{Message: "gv8: module is no longer valid"}
+	}
+	if err := ctx.ensureOpen(); err != nil {
+		return err
+	}
 	ctx.moduleResolver = resolver
 	rtn := C.GV8ModuleInstantiate(ctx.ptr, m.ptr)
 	if rtn.msg == nil {
@@ -62,6 +76,12 @@ func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
 }
 
 func (m *Module) Evaluate(ctx *Context) (*Value, error) {
+	if m == nil || m.ptr == nil {
+		return nil, &JSError{Message: "gv8: module is no longer valid"}
+	}
+	if err := ctx.ensureOpen(); err != nil {
+		return nil, err
+	}
 	rtn := C.GV8ModuleEvaluate(ctx.ptr, m.ptr)
 	return valueResult(ctx, rtn)
 }
@@ -124,6 +144,9 @@ func (m *Module) ReadyNamespace(ctx *Context, resolver ModuleResolver, pump func
 }
 
 func (m *Module) Namespace(ctx *Context) *Object {
+	if m == nil || m.ptr == nil || ctx == nil || ctx.isClosed() {
+		return nil
+	}
 	return &Object{Value: newValue(ctx, C.GV8ModuleGetNamespace(ctx.ptr, m.ptr))}
 }
 

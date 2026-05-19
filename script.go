@@ -30,7 +30,21 @@ func compileUnboundScript(iso *Isolate, source string, origin ScriptOrigin) (*Un
 	return &UnboundScript{ptr: rtn.ptr, iso: iso}, nil
 }
 
+func (s *UnboundScript) Release() {
+	if s == nil || s.ptr == nil {
+		return
+	}
+	C.GV8UnboundScriptRelease(s.ptr)
+	s.ptr = nil
+}
+
 func (s *UnboundScript) Run(ctx *Context) (*Value, error) {
+	if s == nil || s.ptr == nil {
+		return nil, &JSError{Message: "gv8: script is no longer valid"}
+	}
+	if err := ctx.ensureOpen(); err != nil {
+		return nil, err
+	}
 	rtn := C.GV8UnboundScriptRun(ctx.ptr, s.ptr)
 	return valueResult(ctx, rtn)
 }

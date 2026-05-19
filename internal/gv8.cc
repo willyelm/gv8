@@ -437,6 +437,14 @@ GV8RtnValue GV8UnboundScriptRun(GV8ContextPtr ctx_ptr,
   return rtn;
 }
 
+void GV8UnboundScriptRelease(GV8UnboundScriptPtr script_ptr) {
+  if (script_ptr == nullptr) {
+    return;
+  }
+  script_ptr->ptr.Reset();
+  delete script_ptr;
+}
+
 GV8RtnModule GV8CompileModule(GV8IsolatePtr iso,
                               const char* source,
                               const char* resource_name,
@@ -467,6 +475,14 @@ GV8RtnModule GV8CompileModule(GV8IsolatePtr iso,
   wrap->ptr.Reset(iso, module);
   rtn.ptr = wrap;
   return rtn;
+}
+
+void GV8ModuleRelease(GV8ModulePtr module_ptr) {
+  if (module_ptr == nullptr) {
+    return;
+  }
+  module_ptr->ptr.Reset();
+  delete module_ptr;
 }
 
 GV8RtnError GV8ModuleInstantiate(GV8ContextPtr ctx_ptr, GV8ModulePtr module_ptr) {

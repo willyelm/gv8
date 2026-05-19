@@ -92,6 +92,7 @@ extern GV8RtnUnboundScript GV8CompileUnboundScript(GV8IsolatePtr iso,
                                                    const char* resource_name,
                                                    int line_offset,
                                                    int column_offset);
+extern void GV8UnboundScriptRelease(GV8UnboundScriptPtr script);
 extern GV8RtnValue GV8UnboundScriptRun(GV8ContextPtr ctx,
                                        GV8UnboundScriptPtr script);
 
@@ -100,6 +101,7 @@ extern GV8RtnModule GV8CompileModule(GV8IsolatePtr iso,
                                      const char* resource_name,
                                      int line_offset,
                                      int column_offset);
+extern void GV8ModuleRelease(GV8ModulePtr module);
 extern GV8RtnError GV8ModuleInstantiate(GV8ContextPtr ctx, GV8ModulePtr module);
 extern GV8RtnValue GV8ModuleEvaluate(GV8ContextPtr ctx, GV8ModulePtr module);
 extern GV8ValuePtr GV8ModuleGetNamespace(GV8ContextPtr ctx, GV8ModulePtr module);
