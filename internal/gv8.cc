@@ -99,6 +99,15 @@ gv8_value* wrapValue(gv8_ctx* ctx, Isolate* iso, Local<Value> value) {
   return trackValue(ctx, wrap);
 }
 
+gv8_value* wrapBorrowedValue(gv8_ctx* ctx, Isolate* iso, Local<Value> value) {
+  gv8_value* wrap = new gv8_value;
+  wrap->id = 0;
+  wrap->ctx = ctx;
+  wrap->iso = iso;
+  wrap->ptr.Reset(iso, value);
+  return wrap;
+}
+
 GV8RtnError EmptyError() {
   GV8RtnError rtn = {nullptr, nullptr, nullptr};
   return rtn;
@@ -272,27 +281,40 @@ void HostFunctionCallback(const FunctionCallbackInfo<Value>& info) {
       Local<External>::Cast(context->GetEmbedderDataV2(2))->Value(kContextWrapTag));
   int callback_id = info.Data().As<Int32>()->Value();
 
-  gv8_value* recv = wrapValue(ctx, iso, info.This());
+  gv8_value* recv = wrapBorrowedValue(ctx, iso, info.This());
   GV8ValuePtr* argv = nullptr;
   if (info.Length() > 0) {
     argv = static_cast<GV8ValuePtr*>(malloc(sizeof(GV8ValuePtr) * info.Length()));
     for (int i = 0; i < info.Length(); ++i) {
-      argv[i] = wrapValue(ctx, iso, info[i]);
+      argv[i] = wrapBorrowedValue(ctx, iso, info[i]);
     }
   }
 
   GV8CallbackResult result =
       gv8FunctionCallback(ctx->ref, callback_id, recv, info.Length(), argv);
-  if (argv != nullptr) {
-    free(argv);
+  Local<Value> error_value;
+  Local<Value> return_value;
+  if (result.error_value != nullptr) {
+    error_value = result.error_value->ptr.Get(iso);
+  } else if (result.value != nullptr) {
+    return_value = result.value->ptr.Get(iso);
   }
 
+  GV8ValueRelease(recv);
+  if (argv != nullptr) {
+    for (int i = 0; i < info.Length(); ++i) {
+      GV8ValueRelease(argv[i]);
+    }
+    free(argv);
+  }
   if (result.error_value != nullptr) {
-    iso->ThrowException(result.error_value->ptr.Get(iso));
+    GV8ValueRelease(result.error_value);
+    iso->ThrowException(error_value);
     return;
   }
-  if (result.value != nullptr) {
-    info.GetReturnValue().Set(result.value->ptr.Get(iso));
+  if (!return_value.IsEmpty()) {
+    GV8ValueRelease(result.value);
+    info.GetReturnValue().Set(return_value);
   }
 }
 
@@ -329,6 +351,10 @@ void ExceptionMessageCallback(Local<Message> message, Local<Value> data) {
 }
 
 extern "C" {
+
+int GV8ABIVersion() {
+  return GV8_ABI_VERSION;
+}
 
 void GV8Init() {
   std::string icu_data = SharedLibraryDir() + "/icudtl.dat";
@@ -785,6 +811,13 @@ void GV8ValueRelease(GV8ValuePtr value) {
   }
   value->ptr.Reset();
   delete value;
+}
+
+GV8ValuePtr GV8ValueRetain(GV8ValuePtr value) {
+  if (value == nullptr) {
+    return nullptr;
+  }
+  return wrapValue(value->ctx, value->iso, value->ptr.Get(value->iso));
 }
 
 GV8RtnString GV8ValueToString(GV8ValuePtr value_ptr) {
