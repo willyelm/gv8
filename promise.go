@@ -60,10 +60,10 @@ func (r *PromiseResolver) Promise() *Promise {
 
 func (r *PromiseResolver) Resolve(value *Value) error {
 	if r == nil || !r.valid() {
-		return &JSError{Message: "gv8: value is no longer valid"}
+		return invalidValueError()
 	}
 	if value == nil || !value.valid() {
-		return &JSError{Message: "gv8: value is no longer valid"}
+		return invalidValueError()
 	}
 	release, err := r.ctx.iso.enter()
 	if err != nil {
@@ -75,10 +75,10 @@ func (r *PromiseResolver) Resolve(value *Value) error {
 
 func (r *PromiseResolver) Reject(value *Value) error {
 	if r == nil || !r.valid() {
-		return &JSError{Message: "gv8: value is no longer valid"}
+		return invalidValueError()
 	}
 	if value == nil || !value.valid() {
-		return &JSError{Message: "gv8: value is no longer valid"}
+		return invalidValueError()
 	}
 	release, err := r.ctx.iso.enter()
 	if err != nil {
@@ -115,7 +115,7 @@ func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*
 		return nil, errors.New("gv8: nil promise")
 	}
 	if !p.valid() {
-		return nil, &JSError{Message: "gv8: value is no longer valid"}
+		return nil, invalidValueError()
 	}
 
 	pollInterval := options.PollInterval
@@ -125,7 +125,7 @@ func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*
 
 	for {
 		if !p.valid() {
-			return nil, &JSError{Message: "gv8: value is no longer valid"}
+			return nil, invalidValueError()
 		}
 		if p.ctx != nil && p.ctx.iso != nil {
 			p.ctx.iso.PerformMicrotaskCheckpoint()

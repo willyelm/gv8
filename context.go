@@ -205,7 +205,7 @@ func (c *Context) ensureOpen() error {
 		return fmt.Errorf("gv8: nil context")
 	}
 	if c.isClosed() {
-		return fmt.Errorf("gv8: context is closed")
+		return fmt.Errorf(errMsgContextClosed)
 	}
 	return nil
 }

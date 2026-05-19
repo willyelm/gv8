@@ -73,7 +73,7 @@ func (m *Module) Release() {
 // Instantiate links the module using resolver.
 func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
 	if m == nil || m.ptr == nil {
-		return &JSError{Message: "gv8: module is no longer valid"}
+		return invalidModuleError()
 	}
 	if err := ctx.ensureOpen(); err != nil {
 		return err
@@ -94,7 +94,7 @@ func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
 // Evaluate evaluates the already instantiated module.
 func (m *Module) Evaluate(ctx *Context) (*Value, error) {
 	if m == nil || m.ptr == nil {
-		return nil, &JSError{Message: "gv8: module is no longer valid"}
+		return nil, invalidModuleError()
 	}
 	if err := ctx.ensureOpen(); err != nil {
 		return nil, err

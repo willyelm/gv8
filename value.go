@@ -56,7 +56,7 @@ func (v *Value) String() string {
 // StringValue converts the value to a string and reports conversion errors.
 func (v *Value) StringValue() (string, error) {
 	if !v.valid() {
-		return "", &JSError{Message: "gv8: value is no longer valid"}
+		return "", invalidValueError()
 	}
 	release := v.ctx.iso.mustEnter()
 	defer release()
@@ -196,7 +196,7 @@ func (v *Value) IsUint8ClampedArray() bool {
 
 func (v *Value) Bytes() ([]byte, error) {
 	if !v.valid() {
-		return nil, &JSError{Message: "gv8: value is no longer valid"}
+		return nil, invalidValueError()
 	}
 	release, err := v.ctx.iso.enter()
 	if err != nil {
@@ -241,7 +241,7 @@ type Object struct {
 
 func (o *Object) Get(name string) (*Value, error) {
 	if o == nil || !o.valid() {
-		return nil, &JSError{Message: "gv8: value is no longer valid"}
+		return nil, invalidValueError()
 	}
 	release, err := o.ctx.iso.enter()
 	if err != nil {
@@ -257,7 +257,7 @@ func (o *Object) Get(name string) (*Value, error) {
 
 func (o *Object) GetIdx(index uint32) (*Value, error) {
 	if o == nil || !o.valid() {
-		return nil, &JSError{Message: "gv8: value is no longer valid"}
+		return nil, invalidValueError()
 	}
 	release, err := o.ctx.iso.enter()
 	if err != nil {
@@ -270,7 +270,7 @@ func (o *Object) GetIdx(index uint32) (*Value, error) {
 
 func (o *Object) Set(name string, value any) error {
 	if o == nil || !o.valid() {
-		return &JSError{Message: "gv8: value is no longer valid"}
+		return invalidValueError()
 	}
 	release, err := o.ctx.iso.enter()
 	if err != nil {
@@ -292,7 +292,7 @@ func (o *Object) Set(name string, value any) error {
 
 func (o *Object) CallMethod(name string, args ...any) (*Value, error) {
 	if o == nil || !o.valid() {
-		return nil, &JSError{Message: "gv8: value is no longer valid"}
+		return nil, invalidValueError()
 	}
 	release, err := o.ctx.iso.enter()
 	if err != nil {
@@ -320,7 +320,7 @@ type Function struct {
 
 func (f *Function) Call(recv *Object, args ...any) (*Value, error) {
 	if f == nil || !f.valid() {
-		return nil, &JSError{Message: "gv8: value is no longer valid"}
+		return nil, invalidValueError()
 	}
 	release, err := f.ctx.iso.enter()
 	if err != nil {
@@ -343,7 +343,7 @@ func JSONStringify(ctx *Context, value *Value) (string, error) {
 		return "", err
 	}
 	if value == nil || !value.valid() {
-		return "", &JSError{Message: "gv8: value is no longer valid"}
+		return "", invalidValueError()
 	}
 	release, err := ctx.iso.enter()
 	if err != nil {
