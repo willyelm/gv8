@@ -74,6 +74,24 @@ context-global resolver.
   pressure signaling
 - `NewIsolateWithOptions(...)` to configure initial and maximum heap sizes
 
+## Observability
+
+`gv8` exposes lightweight isolate-level observability hooks and counters.
+
+- `SetUnhandledPromiseRejectionHandler(...)`
+- `SetExceptionHandler(...)`
+- `SetModuleResolutionFailureHandler(...)`
+- `ObservabilitySnapshot()`
+
+The snapshot currently tracks:
+
+- unhandled promise rejections
+- uncaught exception messages
+- module resolution failures
+
+These hooks are intended for host logging, metrics, and diagnostics without
+requiring the V8 inspector.
+
 ## Threading
 
 `gv8` uses an externally synchronized isolate model.

@@ -38,10 +38,10 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Support memory limits and basic heap pressure reporting.
 - [x] Expose the minimum controls needed to kill runaway code.
 
-[ ] 8. Add observability
-- [ ] Expose V8 version, heap stats, and basic counters.
-- [ ] Surface unhandled promise rejections.
-- [ ] Add optional hooks for exceptions and resolver failures.
+[x] 8. Add observability
+- [x] Expose V8 version, heap stats, and basic counters.
+- [x] Surface unhandled promise rejections.
+- [x] Add optional hooks for exceptions and resolver failures.
 
 [ ] 9. Tighten API shape around the simple core
 - [ ] Keep the surface focused on `Isolate`, `Context`, `Script`, `Module`, `Value`, `Function`, and `Promise`.
