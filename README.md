@@ -49,6 +49,16 @@ If you need more control, `Promise.AwaitWithOptions()` lets you provide:
 - a `Pump` callback for host-driven progress
 - a `PollInterval` for default wait behavior when no pump is used
 
+## Module Resolution
+
+Module resolvers in `gv8` are bound to module graphs, not stored as one mutable
+context-global resolver.
+
+- Static imports resolve by referrer module identity.
+- Dynamic imports resolve by importer resource name.
+- Multiple independent module graphs can coexist in one context without
+  overwriting each other's resolver state.
+
 ## Threading
 
 `gv8` uses an externally synchronized isolate model.

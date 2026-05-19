@@ -28,10 +28,10 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Expose a simple event-loop or pump contract.
 - [x] Support timeout and cancellation without burning CPU.
 
-[ ] 6. Isolate module loading state
-- [ ] Stop storing one mutable resolver on `Context`.
-- [ ] Bind resolver state to a module graph or evaluation session.
-- [ ] Add tests for interleaved and concurrent module loading.
+[x] 6. Isolate module loading state
+- [x] Stop storing one mutable resolver on `Context`.
+- [x] Bind resolver state to a module graph or evaluation session.
+- [x] Add tests for interleaved and concurrent module loading.
 
 [ ] 7. Add execution control primitives
 - [ ] Support execution termination and timeouts per isolate.
