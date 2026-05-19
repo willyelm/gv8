@@ -16,7 +16,10 @@
 //
 // The design goal is a compact execution core with explicit control over
 // ownership, scheduling, and teardown. It favors low-overhead primitives over
-// convenience abstractions that hide lifecycle costs.
+// convenience abstractions that hide lifecycle costs, and it is suitable for
+// custom execution environments, plugin systems, and server-side JavaScript
+// workflows. JavaScript running inside V8 also has access to V8's standard
+// WebAssembly APIs.
 //
 // Prefer the explicit APIs that make ownership and lifecycle visible:
 //

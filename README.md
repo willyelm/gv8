@@ -1,23 +1,46 @@
 # gv8
 
-`gv8` is a focused V8 embedding layer for Go hosts that need a lean JavaScript
-execution core.
+`gv8` embeds the V8 JavaScript engine in Go.
 
-The project stays close to V8's model instead of layering on a large Go-side
-framework. The emphasis is on explicit ownership, tight runtime control, and
-low overhead under server workloads. The core API is built around:
+It exposes a small Go-facing API for running modern JavaScript inside V8 while
+staying close to V8's own execution model. 
 
-- `Isolate`
-- `Context`
-- `UnboundScript`
-- `Module`
-- `Value` / `Object` / `Function` / `Promise`
-- `ModuleResolver`
-- `JSError`
+The goal is to be a compact, predictable execution for Go
+hosts that need JavaScript and V8, not a batteries-included runtime. `gv8` 
+is built to keep V8 embedding in Go small, direct, and efficient.
+
+## What It Supports
+
+- isolates and contexts
+- scripts and ES modules
+- static and dynamic module loading
+- promises and microtask pumping
+- host function bindings
+- JSON helpers
+- byte access for `ArrayBuffer` and typed arrays
+- JavaScript-hosted WebAssembly execution through V8's standard `WebAssembly` APIs
+- execution termination, heap limits, and memory pressure signals
+- lightweight observability for exceptions, promise rejection, and module resolution failures
+
+## Good Fits
+
+- custom execution environments
+- application runtimes
+- plugin systems
+- server-side JavaScript workflows
+
+## Design Goals
+
+- stay close to V8 concepts instead of inventing a large Go-side framework
+- keep ownership explicit
+- keep isolate behavior predictable under load
+- keep the API surface compact
+- keep runtime overhead low
+- make common embedder work cheaper without absorbing host semantics
 
 ## Core API
 
-The intended long-lived embedding surface is:
+The intended long-lived surface is:
 
 - `Isolate`
 - `Context`
@@ -27,186 +50,35 @@ The intended long-lived embedding surface is:
 - `Function`
 - `Promise`
 
-These are the APIs to prefer when building a host runtime.
+Prefer the explicit APIs built around those types. Some convenience helpers
+remain for ergonomics, but they are secondary to the ownership-first path.
 
-## Design Direction
-
-`gv8` is shaped for operators and runtime authors who want JavaScript
-execution in-process without surrendering lifecycle control to a broad helper
-framework.
-
-The design priorities are:
-
-- direct mapping to V8 concepts
-- explicit ownership and teardown
-- predictable isolate behavior under load
-- small API surface with low abstraction cost
-
-The design intentionally avoids:
-
-- broad V8 surface parity for its own sake
-- hidden schedulers or event loops
-- large convenience layers that obscure lifecycle boundaries
-- host features that are better owned by the embedding application
-
-## Convenience APIs
-
-Some helpers remain available for ergonomics, but they are secondary to the
-core ownership-first API shape.
-
-Examples:
-
-- `Context.GetGlobal`
-- `Context.SetGlobal`
-- `Context.SetGlobals`
-- `Context.Bind`
-- `Value.String`
-- `Module.InstantiateAndEvaluate`
-- `Module.EvaluateNamespace`
-- `Module.ReadyNamespace`
-
-Prefer the explicit forms that keep lifecycle and ownership visible at the
-callsite.
-
-Current support includes:
-
-- script compilation and execution
-- ESM compilation, instantiation, evaluation, and namespace access
-- resolver-driven module loading
-- dynamic import callbacks
-- host functions
-- object/property helpers
-- JSON helpers
-- promise resolution and awaiting
-
-## Server Runtime Scope
-
-`gv8` is intentionally scoped to the minimum feature set needed for a
-server-side JavaScript host runtime.
-
-The supported core for that use case is:
-
-- stable host function callbacks
-- ESM loading with static and dynamic import
-- JSON parsing and stringification
-- byte access for `ArrayBuffer` and typed array views
-- promise resolution, awaiting, and explicit microtask pumping
-
-The project does not try to expose the full V8 embedder surface. Features like
-snapshots remain optional and out of scope unless startup latency requirements
-justify the added maintenance and API complexity.
-
-## Operational Contract
-
-The current production contract is intentionally narrow.
-
-- Supported platforms: `darwin/arm64`, `linux/amd64`, `linux/arm64`
-- Ownership model: every handle belongs to one isolate and one context lineage
-- Concurrency model: isolate access is externally synchronized
-- Failure model: APIs returning `error` surface JavaScript exceptions as
-  `JSError`
-- Teardown model: explicit `Close`, `Dispose`, and `Release` calls remain part
-  of normal host ownership
-
-What production support means in this repository:
-
-- the supported platforms build against the bundled native runtime
-- core server-runtime features are covered by dedicated tests
-- isolate misuse and invalid-handle paths fail predictably
-- CI exercises the supported target matrix plus focused leak and stress passes
-
-What remains intentionally out of scope:
-
-- full embedder API coverage
-- inspector-driven developer tooling as a core contract
-- browser-class host facilities
-- large host runtime abstractions above the execution core
-
-## Error Handling
-
-`gv8` reports JavaScript exceptions as `JSError`.
-
-- APIs that already return `error` use `JSError` for V8 exceptions.
-- `Value.StringValue()` returns `(string, error)` and reports conversion
-  failures as `JSError`.
-- `Value.String()` is a convenience helper that returns `""` on conversion
-  failure instead of panicking.
-- Promise rejection surfaced by `Promise.Await()` is returned as `JSError`.
-
-## Promise Waiting
-
-`Promise.Await()` is safe for server runtimes by default.
-
-- It performs a microtask checkpoint before each wait iteration.
-- It does not busy-spin when no host pump is provided.
-- It honors context cancellation and deadlines.
-- The `pump` callback is the host event-loop integration point.
-
-If you need more control, `Promise.AwaitWithOptions()` lets you provide:
-
-- a `Pump` callback for host-driven progress
-- a `PollInterval` for default wait behavior when no pump is used
-
-## Module Resolution
-
-Module resolvers in `gv8` are bound to module graphs, not stored as one mutable
-context-global resolver.
-
-- Static imports resolve by referrer module identity.
-- Dynamic imports resolve by importer resource name.
-- Multiple independent module graphs can coexist in one context without
-  overwriting each other's resolver state.
-
-## Execution Control
-
-`gv8` exposes the minimum isolate controls needed for a server runtime:
-
-- `TerminateExecution()` to stop runaway JavaScript
-- `CancelTerminateExecution()` to resume execution capability after handling a
-  termination event
-- `IsExecutionTerminating()` to inspect termination state
-- `TerminateOnContextDone(ctx)` to connect isolate termination to host
-  cancellation or deadlines
-- `HeapStatistics()` for basic memory reporting
-- `LowMemoryNotification()` and `MemoryPressureNotification(...)` for heap
-  pressure signaling
-- `NewIsolateWithOptions(...)` to configure initial and maximum heap sizes
-
-## Observability
-
-`gv8` exposes lightweight isolate-level observability hooks and counters.
-
-- `SetUnhandledPromiseRejectionHandler(...)`
-- `SetExceptionHandler(...)`
-- `SetModuleResolutionFailureHandler(...)`
-- `ObservabilitySnapshot()`
-
-The snapshot currently tracks:
-
-- unhandled promise rejections
-- uncaught exception messages
-- module resolution failures
-
-These hooks are intended for host logging, metrics, and diagnostics without
-requiring the V8 inspector.
-
-## Threading
-
-`gv8` uses an externally synchronized isolate model.
+## Operational Model
 
 - One isolate may have only one active caller at a time.
-- Reentrant calls on that same thread are allowed so host callbacks can call
-  back into `gv8`.
-- Concurrent use of the same isolate, context, or values from multiple threads
-  is rejected at runtime.
-- Different isolates may be used concurrently.
+- Reentrant calls on that same thread are allowed.
+- Different isolates may run concurrently.
+- Every handle belongs to one isolate and one context lineage.
+- `Close`, `Dispose`, and `Release` are part of normal ownership.
+- APIs returning `error` surface JavaScript exceptions as `JSError`.
 
-In practice:
+In practice, treat an `Isolate` and everything created from it as a
+single-threaded unit and serialize access in the host.
 
-- treat an `Isolate` and everything created from it as a single-threaded unit
-- serialize access in your host runtime
-- expect methods that return `error` to report concurrent access violations
-- expect some non-error convenience methods to panic if you violate the contract
+## Runtime Scope
+
+`gv8` is intentionally narrow. It focuses on the execution primitives needed to
+run JavaScript from Go with explicit host control:
+
+- ES module execution
+- resolver-driven loading
+- host callbacks
+- promise integration
+- execution control
+- JavaScript-driven WebAssembly execution
+
+It does not try to provide full V8 surface parity, a browser-style host, or a
+large batteries-included runtime abstraction above the execution core.
 
 ## Example
 
@@ -221,15 +93,288 @@ value, err := ctx.RunScript("40 + 2", "example.js")
 if err != nil {
 	panic(err)
 }
+defer value.Release()
 
 println(value.Integer())
 ```
 
-## Bundled Runtime
+## API Overview
 
-`gv8` vendors V8 headers, version metadata, and prebuilt runtimes in-module.
+### Isolates And Contexts
 
-Each target ships one runtime:
+An `Isolate` owns V8 state. A `Context` is an execution environment inside that
+isolate.
+
+```go
+iso := gv8.NewIsolate()
+defer iso.Dispose()
+
+ctx := gv8.NewContext(iso)
+defer ctx.Close()
+```
+
+### Scripts
+
+Use `RunScript` for one-off execution, or compile an `UnboundScript` if you
+want to run the same source more than once.
+
+```go
+value, err := ctx.RunScript("6 * 7", "main.js")
+if err != nil {
+	panic(err)
+}
+defer value.Release()
+```
+
+```go
+script, err := iso.CompileUnboundScript("40 + 2", gv8.ScriptOrigin{
+	ResourceName: "compiled.js",
+})
+if err != nil {
+	panic(err)
+}
+defer script.Release()
+```
+
+### ES Modules
+
+`gv8` supports compiling, instantiating, evaluating, and reading exports from
+ES modules.
+
+```go
+mod, err := iso.CompileModule(`export const answer = 42;`, gv8.ScriptOrigin{
+	ResourceName: "mod.js",
+	IsModule:     true,
+})
+if err != nil {
+	panic(err)
+}
+defer mod.Release()
+
+if err := mod.Instantiate(ctx, nil); err != nil {
+	panic(err)
+}
+if _, err := mod.Evaluate(ctx); err != nil {
+	panic(err)
+}
+```
+
+### Module Resolution
+
+Imports are resolved through a host-provided resolver. Static imports resolve
+by referrer module identity, and dynamic imports resolve by importer resource
+name.
+
+```go
+type resolver struct {
+	modules map[string]string
+	cache   map[string]*gv8.Module
+}
+
+func (r *resolver) ResolveModule(ctx *gv8.Context, spec string, _ *gv8.Module) (*gv8.Module, error) {
+	if r.cache == nil {
+		r.cache = map[string]*gv8.Module{}
+	}
+	if mod, ok := r.cache[spec]; ok {
+		return mod, nil
+	}
+
+	mod, err := ctx.Isolate().CompileModule(r.modules[spec], gv8.ScriptOrigin{
+		ResourceName: spec,
+		IsModule:     true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	r.cache[spec] = mod
+	return mod, nil
+}
+```
+
+```go
+resolver := &resolver{
+	modules: map[string]string{
+		"./dep.js": `export const answer = 41;`,
+	},
+}
+
+mod, err := iso.CompileModule(`
+	import { answer } from "./dep.js";
+	export const value = answer + 1;
+`, gv8.ScriptOrigin{ResourceName: "main.js", IsModule: true})
+if err != nil {
+	panic(err)
+}
+defer mod.Release()
+
+if err := mod.Instantiate(ctx, resolver); err != nil {
+	panic(err)
+}
+```
+
+### Dynamic Import
+
+If your resolver also implements `DynamicImportResolver`, it can resolve
+`import(...)` at runtime by returning a promise for the target module namespace.
+
+```go
+func (r *resolver) ResolveDynamicImport(ctx *gv8.Context, spec string, _ string) (*gv8.Promise, error) {
+	resolver, err := gv8.NewPromiseResolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	mod, err := r.ResolveModule(ctx, spec, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := mod.Instantiate(ctx, r); err == nil && mod.Status() == gv8.ModuleStatusInstantiated {
+		_, err = mod.Evaluate(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := resolver.Resolve(mod.Namespace(ctx).Value); err != nil {
+		return nil, err
+	}
+	return resolver.Promise(), nil
+}
+```
+
+### Host Functions
+
+Use host functions to expose Go logic to JavaScript.
+
+```go
+add, err := gv8.NewFunction(ctx, func(info *gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+	args := info.Args()
+	return gv8.NewIntegerValue(info.Context(), args[0].Integer()+args[1].Integer())
+})
+if err != nil {
+	panic(err)
+}
+defer add.Release()
+
+global := ctx.Global()
+defer global.Release()
+
+if err := global.Set("add", add); err != nil {
+	panic(err)
+}
+```
+
+### Promises
+
+`Promise.Await()` waits for JavaScript promises from Go. It performs microtask
+checkpoints and can use a host-provided pump callback.
+
+```go
+resolver, err := gv8.NewPromiseResolver(ctx)
+if err != nil {
+	panic(err)
+}
+defer resolver.Release()
+
+value, _ := gv8.NewStringValue(ctx, "done")
+defer value.Release()
+
+go func() {
+	_ = resolver.Resolve(value)
+}()
+
+result, err := resolver.Promise().Await(context.Background(), nil)
+if err != nil {
+	panic(err)
+}
+defer result.Release()
+```
+
+### Execution Control
+
+You can terminate runaway execution, inspect heap limits, and attach isolate
+termination to a host context.
+
+```go
+iso := gv8.NewIsolateWithOptions(gv8.IsolateOptions{
+	InitialHeapSizeBytes: 8 << 20,
+	MaxHeapSizeBytes:     32 << 20,
+})
+defer iso.Dispose()
+
+stats := iso.HeapStatistics()
+_ = stats.HeapSizeLimit
+```
+
+### Observability
+
+The isolate can report unhandled promise rejections, surfaced JavaScript
+exceptions, and module resolution failures.
+
+```go
+iso.SetExceptionHandler(func(err *gv8.JSError) {
+	log.Printf("exception: %s", err.Message)
+})
+
+iso.SetModuleResolutionFailureHandler(func(specifier, referrer string, err error) {
+	log.Printf("module resolution failed: %s from %s: %v", specifier, referrer, err)
+})
+```
+
+### Bytes And Typed Arrays
+
+`gv8` can read bytes from `ArrayBuffer` values and typed array views.
+
+```go
+value, err := ctx.RunScript(`
+	const bytes = new Uint8Array([72, 73]);
+	bytes.buffer;
+`, "array-buffer.js")
+if err != nil {
+	panic(err)
+}
+defer value.Release()
+
+data, err := value.Bytes()
+if err != nil {
+	panic(err)
+}
+```
+
+### WebAssembly
+
+JavaScript running inside `gv8` can use V8's standard `WebAssembly` APIs.
+
+```go
+value, err := ctx.RunScript(`
+	const wasmBytes = new Uint8Array([
+		0x00, 0x61, 0x73, 0x6d,
+		0x01, 0x00, 0x00, 0x00,
+		0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+		0x03, 0x02, 0x01, 0x00,
+		0x07, 0x0a, 0x01, 0x06, 0x61, 0x6e, 0x73, 0x77, 0x65, 0x72, 0x00, 0x00,
+		0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b,
+	]);
+
+	const mod = new WebAssembly.Module(wasmBytes);
+	const instance = new WebAssembly.Instance(mod);
+	instance.exports.answer();
+`, "wasm.js")
+if err != nil {
+	panic(err)
+}
+defer value.Release()
+```
+
+## Supported Platforms
+
+Bundled runtimes are committed for:
+
+- `darwin/arm64`
+- `linux/amd64`
+- `linux/arm64`
+
+Runtime artifacts:
 
 - `internal/v8/darwin_arm64/libgv8.dylib`
 - `internal/v8/linux_x86_64/libgv8.so`
@@ -237,7 +382,7 @@ Each target ships one runtime:
 
 ## Maintenance
 
-`internal/v8/VERSION` is the single source of truth for the bundled V8 version.
+`internal/v8/VERSION` is the source of truth for the bundled V8 version.
 
 Maintainer flow:
 
@@ -246,7 +391,9 @@ Maintainer flow:
 - `make build-linux-x64`
 - `make build-linux-arm64`
 
-`make fetch` updates the pinned V8 source.
+Useful test targets:
 
-The build targets reuse isolated workspaces under `.v8/workspaces/` and produce
-the bundled runtimes committed under `internal/v8/`.
+- `make test`
+- `make test-leak`
+- `make test-stress`
+- `make ci-test`
