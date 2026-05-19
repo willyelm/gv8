@@ -59,12 +59,6 @@ func (v *Value) Release() {
 	v.ptr = nil
 }
 
-// Deprecated: prefer StringValue so conversion failure remains explicit.
-func (v *Value) String() string {
-	value, _ := v.StringValue()
-	return value
-}
-
 // StringValue converts the value to a string and reports conversion errors.
 func (v *Value) StringValue() (string, error) {
 	if !v.valid() {

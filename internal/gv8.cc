@@ -352,10 +352,6 @@ void ExceptionMessageCallback(Local<Message> message, Local<Value> data) {
 
 extern "C" {
 
-int GV8ABIVersion() {
-  return GV8_ABI_VERSION;
-}
-
 void GV8Init() {
   std::string icu_data = SharedLibraryDir() + "/icudtl.dat";
   V8::InitializeICUDefaultLocation(nullptr, icu_data.c_str());

@@ -224,53 +224,6 @@ func (c *Context) Global() *Object {
 	return &Object{Value: newValue(c, C.GV8ContextGlobal(c.ptr))}
 }
 
-// Deprecated: prefer Global().Get(name) so global-object ownership remains
-// explicit at the callsite.
-func (c *Context) GetGlobal(name string) (*Value, error) {
-	if err := c.ensureOpen(); err != nil {
-		return nil, err
-	}
-	global := c.Global()
-	defer global.Release()
-	return global.Get(name)
-}
-
-// Deprecated: prefer Global().Set(name, value) so global-object ownership
-// remains explicit at the callsite.
-func (c *Context) SetGlobal(name string, value any) error {
-	if err := c.ensureOpen(); err != nil {
-		return err
-	}
-	global := c.Global()
-	defer global.Release()
-	return global.Set(name, value)
-}
-
-// Deprecated: prefer repeated explicit Global().Set calls so ownership and
-// failure points stay visible.
-func (c *Context) SetGlobals(values map[string]any) error {
-	if err := c.ensureOpen(); err != nil {
-		return err
-	}
-	for name, value := range values {
-		if err := c.SetGlobal(name, value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Deprecated: prefer NewFunction plus Global().Set so function lifetime stays
-// explicit.
-func (c *Context) Bind(name string, fn HostFunction) error {
-	hostFn, err := NewFunction(c, fn)
-	if err != nil {
-		return err
-	}
-	defer hostFn.Release()
-	return c.SetGlobal(name, hostFn)
-}
-
 // NewObject allocates a new object in the context.
 func (c *Context) NewObject() (*Object, error) {
 	if err := c.ensureOpen(); err != nil {

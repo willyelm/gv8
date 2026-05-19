@@ -4,10 +4,7 @@ package gv8
 // #include "gv8.h"
 import "C"
 
-import (
-	"context"
-	"unsafe"
-)
+import "unsafe"
 
 // Module is a compiled ECMAScript module bound to an isolate.
 type Module struct {
@@ -106,69 +103,6 @@ func (m *Module) Evaluate(ctx *Context) (*Value, error) {
 	defer release()
 	rtn := C.GV8ModuleEvaluate(ctx.ptr, m.ptr)
 	return valueResult(ctx, rtn)
-}
-
-func (m *Module) EnsureInstantiated(ctx *Context, resolver ModuleResolver) error {
-	if m == nil {
-		return &JSError{Message: "gv8: nil module"}
-	}
-	if m.Status() != ModuleStatusUninstantiated {
-		return nil
-	}
-	return m.Instantiate(ctx, resolver)
-}
-
-// Deprecated: prefer explicit Instantiate followed by Evaluate so lifecycle
-// stages remain visible.
-func (m *Module) InstantiateAndEvaluate(ctx *Context, resolver ModuleResolver, pump func(context.Context) error) (*Value, error) {
-	if err := m.EnsureInstantiated(ctx, resolver); err != nil {
-		return nil, err
-	}
-
-	value, err := m.Evaluate(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if value == nil || !value.IsPromise() {
-		return value, nil
-	}
-	return value.Promise().Await(context.Background(), pump)
-}
-
-// Deprecated: prefer explicit Evaluate followed by Namespace so lifecycle
-// stages remain visible.
-func (m *Module) EvaluateNamespace(ctx *Context, pump func(context.Context) error) (*Object, error) {
-	value, err := m.Evaluate(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if value != nil && value.IsPromise() {
-		if _, err := value.Promise().Await(context.Background(), pump); err != nil {
-			return nil, err
-		}
-	}
-	return m.Namespace(ctx), nil
-}
-
-// Deprecated: prefer explicit Instantiate, Evaluate, and Namespace calls so
-// lifecycle stages remain visible.
-func (m *Module) ReadyNamespace(ctx *Context, resolver ModuleResolver, pump func(context.Context) error) (*Object, error) {
-	if err := m.EnsureInstantiated(ctx, resolver); err != nil {
-		return nil, err
-	}
-
-	switch m.Status() {
-	case ModuleStatusEvaluated:
-		return m.Namespace(ctx), nil
-	case ModuleStatusInstantiated:
-		return m.EvaluateNamespace(ctx, pump)
-	case ModuleStatusInstantiating, ModuleStatusEvaluating:
-		return nil, &JSError{Message: "gv8: module is still being initialized"}
-	case ModuleStatusErrored:
-		return nil, &JSError{Message: "gv8: module is in an errored state"}
-	default:
-		return nil, &JSError{Message: "gv8: unsupported module status"}
-	}
 }
 
 func (m *Module) Namespace(ctx *Context) *Object {

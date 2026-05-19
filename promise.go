@@ -25,12 +25,6 @@ type PromiseResolver struct {
 	*Value
 }
 
-type AwaitOptions struct {
-	Pump         func(context.Context) error
-	PollInterval time.Duration
-}
-
-const defaultPromiseAwaitPollInterval = time.Millisecond
 
 func NewPromiseResolver(ctx *Context) (*PromiseResolver, error) {
 	if err := ctx.ensureOpen(); err != nil {
@@ -107,20 +101,11 @@ func (p *Promise) Result() *Value {
 }
 
 func (p *Promise) Await(ctx context.Context, pump func(context.Context) error) (*Value, error) {
-	return p.AwaitWithOptions(ctx, AwaitOptions{Pump: pump})
-}
-
-func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*Value, error) {
 	if p == nil {
 		return nil, errors.New("gv8: nil promise")
 	}
 	if !p.valid() {
 		return nil, invalidValueError()
-	}
-
-	pollInterval := options.PollInterval
-	if pollInterval <= 0 {
-		pollInterval = defaultPromiseAwaitPollInterval
 	}
 
 	for {
@@ -130,11 +115,9 @@ func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*
 		if p.ctx != nil && p.ctx.iso != nil {
 			p.ctx.iso.PerformMicrotaskCheckpoint()
 		}
-
 		if p.State() != PromisePending {
 			break
 		}
-
 		if ctx != nil {
 			select {
 			case <-ctx.Done():
@@ -142,15 +125,13 @@ func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*
 			default:
 			}
 		}
-
-		if options.Pump != nil {
-			if err := options.Pump(ctx); err != nil {
+		if pump != nil {
+			if err := pump(ctx); err != nil {
 				return nil, err
 			}
 			continue
 		}
-
-		timer := time.NewTimer(pollInterval)
+		timer := time.NewTimer(time.Millisecond)
 		if ctx == nil {
 			<-timer.C
 			continue

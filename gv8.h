@@ -3,10 +3,6 @@
 #ifndef GV8_H
 #define GV8_H
 
-// GV8_ABI_VERSION must be incremented whenever the exported C ABI changes:
-// exported function signatures added, removed, or changed; public struct
-// layouts changed. Implementation-only edits to gv8.cc do not require a bump.
-#define GV8_ABI_VERSION 1
 
 #ifdef __cplusplus
 #include "libplatform/libplatform.h"
@@ -92,7 +88,6 @@ typedef struct {
   uint64_t total_allocated_bytes;
 } GV8HeapStatistics;
 
-extern int GV8ABIVersion();
 extern void GV8Init();
 extern GV8IsolatePtr GV8NewIsolate();
 extern GV8IsolatePtr GV8NewIsolateWithHeapLimit(uint64_t initial_heap_size,

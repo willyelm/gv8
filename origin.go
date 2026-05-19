@@ -6,5 +6,4 @@ type ScriptOrigin struct {
 	ResourceName string
 	LineOffset   int
 	ColumnOffset int
-	IsModule     bool
 }
