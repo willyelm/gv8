@@ -56,13 +56,13 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 
 [ ] 11. Improve test depth, not just breadth
 - [x] Add stress tests for repeated create/run/dispose cycles.
-- [ ] Add concurrency tests around isolate and context access.
-- [ ] Add failure-path tests for exceptions, promise rejection, resolver failure, and teardown during pending work.
+- [x] Add concurrency tests around isolate and context access.
+- [x] Add failure-path tests for exceptions, promise rejection, resolver failure, and teardown during pending work.
 
-[ ] 12. Add a minimal CI matrix
-- [ ] Test supported targets on every change.
-- [ ] Run leak and stress tests separately.
-- [ ] Make `make test` self-contained and independent of host cache paths.
+[x] 12. Add a minimal CI matrix
+- [x] Test supported targets on every change.
+- [x] Run leak and stress tests separately.
+- [x] Make `make test` self-contained and independent of host cache paths.
 
 [ ] 13. Clarify operational guarantees in the README
 - [ ] State supported platforms.
