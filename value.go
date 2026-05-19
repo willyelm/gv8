@@ -8,8 +8,9 @@ import "unsafe"
 
 // Value is the base wrapper for V8 values that belong to a Context.
 type Value struct {
-	ptr C.GV8ValuePtr
-	ctx *Context
+	ptr      C.GV8ValuePtr
+	ctx      *Context
+	borrowed bool
 }
 
 func newValue(ctx *Context, ptr C.GV8ValuePtr) *Value {
@@ -21,6 +22,13 @@ func newValue(ctx *Context, ptr C.GV8ValuePtr) *Value {
 		ctx.trackValue(value)
 	}
 	return value
+}
+
+func newBorrowedValue(ctx *Context, ptr C.GV8ValuePtr) *Value {
+	if ptr == nil {
+		return nil
+	}
+	return &Value{ptr: ptr, ctx: ctx, borrowed: true}
 }
 
 func (v *Value) invalidate() {
@@ -36,6 +44,10 @@ func (v *Value) valid() bool {
 
 func (v *Value) Release() {
 	if v == nil || v.ptr == nil {
+		return
+	}
+	if v.borrowed {
+		v.ptr = nil
 		return
 	}
 	if v.ctx != nil {

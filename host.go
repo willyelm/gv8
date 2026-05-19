@@ -154,6 +154,19 @@ func cArgv(args []*Value) (*C.GV8ValuePtr, func()) {
 	return (*C.GV8ValuePtr)(mem), func() { C.free(mem) }
 }
 
+func handoffHostValue(value *Value) C.GV8ValuePtr {
+	if value == nil || value.ptr == nil {
+		return nil
+	}
+	retained := C.GV8ValueRetain(value.ptr)
+	if value.borrowed {
+		value.invalidate()
+		return retained
+	}
+	value.Release()
+	return retained
+}
+
 //export gv8FunctionCallback
 func gv8FunctionCallback(ctxRef C.int, callbackID C.int, recv C.GV8ValuePtr, argc C.int, argv *C.GV8ValuePtr) C.GV8CallbackResult {
 	ctx := getContext(int(ctxRef))
@@ -170,24 +183,44 @@ func gv8FunctionCallback(ctxRef C.int, callbackID C.int, recv C.GV8ValuePtr, arg
 	if argc > 0 && argv != nil {
 		argSlice := unsafe.Slice(argv, int(argc))
 		for i, ptr := range argSlice {
-			args[i] = newValue(ctx, ptr)
+			args[i] = newBorrowedValue(ctx, ptr)
 		}
 	}
+	thisValue := newBorrowedValue(ctx, recv)
 
 	result, err := fn(&FunctionCallbackInfo{
 		ctx:  ctx,
-		this: newValue(ctx, recv).Object(),
+		this: thisValue.Object(),
 		args: args,
 	})
 	if err != nil {
 		errValue, valueErr := newErrorValue(ctx, err.Error())
+		thisValue.invalidate()
+		for _, arg := range args {
+			if arg != nil {
+				arg.invalidate()
+			}
+		}
 		if valueErr != nil || errValue == nil {
 			return C.GV8CallbackResult{}
 		}
-		return C.GV8CallbackResult{error_value: errValue.ptr}
+		return C.GV8CallbackResult{error_value: handoffHostValue(errValue)}
 	}
 	if result == nil {
+		thisValue.invalidate()
+		for _, arg := range args {
+			if arg != nil {
+				arg.invalidate()
+			}
+		}
 		return C.GV8CallbackResult{}
 	}
-	return C.GV8CallbackResult{value: result.ptr}
+	handoff := handoffHostValue(result)
+	thisValue.invalidate()
+	for _, arg := range args {
+		if arg != nil {
+			arg.invalidate()
+		}
+	}
+	return C.GV8CallbackResult{value: handoff}
 }

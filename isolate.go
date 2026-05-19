@@ -12,6 +12,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 )
@@ -268,6 +269,7 @@ func (i *Isolate) enter() (func(), error) {
 		return nil, fmt.Errorf("gv8: nil isolate")
 	}
 
+	runtime.LockOSThread()
 	threadID := uintptr(C.GV8CurrentThreadID())
 
 	i.mu.Lock()
@@ -279,6 +281,7 @@ func (i *Isolate) enter() (func(), error) {
 		return i.leave, nil
 	}
 	if i.ownerThread != threadID {
+		runtime.UnlockOSThread()
 		return nil, fmt.Errorf("gv8: isolate is already in use; callers must externally synchronize access")
 	}
 
@@ -308,6 +311,7 @@ func (i *Isolate) leave() {
 	if i.depth == 0 {
 		i.ownerThread = 0
 	}
+	runtime.UnlockOSThread()
 }
 
 func (i *Isolate) noteUnhandledPromiseRejection(event PromiseRejectEvent, err *JSError) {

@@ -588,7 +588,7 @@ func TestContextCloseInvalidatesPromiseAndFunctionHandles(t *testing.T) {
 }
 
 func TestRepeatedRunAndCloseCycle(t *testing.T) {
-	for range 50 {
+	for range 100 {
 		iso := gv8.NewIsolate()
 		ctx := gv8.NewContext(iso)
 
@@ -603,6 +603,34 @@ func TestRepeatedRunAndCloseCycle(t *testing.T) {
 		ctx.Close()
 		value.Release()
 		iso.Dispose()
+	}
+}
+
+func TestHostCallbackCanReenterIsolateOnSameThread(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	if err := ctx.Bind("reenter", func(info *gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+		value, err := info.Context().RunScript("21 * 2", "reenter.js")
+		if err != nil {
+			return nil, err
+		}
+		return value, nil
+	}); err != nil {
+		t.Fatalf("bind reenter: %v", err)
+	}
+
+	value, err := ctx.RunScript("reenter()", "reenter-host.js")
+	if err != nil {
+		t.Fatalf("run script: %v", err)
+	}
+	defer value.Release()
+
+	if got := value.Integer(); got != 42 {
+		t.Fatalf("unexpected result: got %d want 42", got)
 	}
 }
 
@@ -970,6 +998,37 @@ func TestTemporalPlainDate(t *testing.T) {
 
 	if got := value.String(); got != "2020-05-03" {
 		t.Fatalf("unexpected Temporal result: got %q want %q", got, "2020-05-03")
+	}
+}
+
+func TestWebAssemblyExecution(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	value, err := ctx.RunScript(`
+		const wasmBytes = new Uint8Array([
+			0x00, 0x61, 0x73, 0x6d,
+			0x01, 0x00, 0x00, 0x00,
+			0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+			0x03, 0x02, 0x01, 0x00,
+			0x07, 0x0a, 0x01, 0x06, 0x61, 0x6e, 0x73, 0x77, 0x65, 0x72, 0x00, 0x00,
+			0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b,
+		]);
+
+		const module = new WebAssembly.Module(wasmBytes);
+		const instance = new WebAssembly.Instance(module);
+		instance.exports.answer();
+	`, "wasm.js")
+	if err != nil {
+		t.Fatalf("run script: %v", err)
+	}
+	defer value.Release()
+
+	if got := value.Integer(); got != 42 {
+		t.Fatalf("unexpected wasm result: got %d want 42", got)
 	}
 }
 
