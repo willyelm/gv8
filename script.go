@@ -31,7 +31,7 @@ func compileUnboundScript(iso *Isolate, source string, origin ScriptOrigin) (*Un
 		C.int(origin.ColumnOffset),
 	)
 	if rtn.ptr == nil {
-		return nil, newJSError(rtn.error)
+		return nil, observeJSError(iso, newJSError(rtn.error))
 	}
 	return &UnboundScript{ptr: rtn.ptr, iso: iso}, nil
 }

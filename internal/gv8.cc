@@ -144,6 +144,53 @@ GV8RtnError ExceptionError(TryCatch& try_catch,
   return rtn;
 }
 
+GV8RtnError ErrorFromMessage(Isolate* iso,
+                             Local<Context> ctx,
+                             Local<Message> msg,
+                             Local<Value> value) {
+  GV8RtnError rtn = {nullptr, nullptr, nullptr};
+
+  if (!value.IsEmpty()) {
+    String::Utf8Value exception(iso, value);
+    rtn.msg = CopyString(exception);
+
+    if (value->IsObject()) {
+      Local<Value> stack;
+      Local<String> key =
+          String::NewFromUtf8(iso, "stack", NewStringType::kNormal)
+              .ToLocalChecked();
+      if (value.As<Object>()->Get(ctx, key).ToLocal(&stack)) {
+        String::Utf8Value utf8(iso, stack);
+        rtn.stack = CopyString(utf8);
+      }
+    }
+  }
+
+  if (!msg.IsEmpty()) {
+    std::ostringstream sb;
+    String::Utf8Value origin(iso, msg->GetScriptOrigin().ResourceName());
+    sb << *origin;
+
+    Maybe<int> line = msg->GetLineNumber(ctx);
+    if (line.IsJust()) {
+      sb << ":" << line.FromJust();
+    }
+
+    Maybe<int> col = msg->GetStartColumn(ctx);
+    if (col.IsJust()) {
+      sb << ":" << (col.FromJust() + 1);
+    }
+    rtn.location = CopyString(sb.str());
+
+    if (rtn.msg == nullptr) {
+      String::Utf8Value text(iso, msg->Get());
+      rtn.msg = CopyString(text);
+    }
+  }
+
+  return rtn;
+}
+
 ScriptOrigin MakeOrigin(Isolate* iso,
                         const char* resource_name,
                         int line_offset,
@@ -249,6 +296,38 @@ void HostFunctionCallback(const FunctionCallbackInfo<Value>& info) {
   }
 }
 
+void OnPromiseReject(PromiseRejectMessage message) {
+  Isolate* iso = Isolate::GetCurrent();
+  intptr_t ref = reinterpret_cast<intptr_t>(iso->GetData(1));
+  if (ref == 0) {
+    return;
+  }
+
+  HandleScope handle_scope(iso);
+  Local<Context> ctx = iso->GetEnteredOrMicrotaskContext();
+  Local<Message> msg = Exception::CreateMessage(iso, message.GetValue());
+  GV8RtnError error = ErrorFromMessage(iso, ctx, msg, message.GetValue());
+  gv8PromiseRejectCallback(static_cast<int>(ref),
+                           static_cast<int>(message.GetEvent()),
+                           error);
+}
+
+void ExceptionMessageCallback(Local<Message> message, Local<Value> data) {
+  Isolate* iso = Isolate::GetCurrent();
+  int ref = 0;
+  if (!data.IsEmpty() && data->IsInt32()) {
+    ref = data.As<Int32>()->Value();
+  }
+  if (ref == 0) {
+    return;
+  }
+
+  HandleScope handle_scope(iso);
+  Local<Context> ctx = iso->GetEnteredOrMicrotaskContext();
+  GV8RtnError error = ErrorFromMessage(iso, ctx, message, Local<Value>());
+  gv8ExceptionMessageCallback(ref, error);
+}
+
 extern "C" {
 
 void GV8Init() {
@@ -272,6 +351,7 @@ GV8IsolatePtr GV8NewIsolate() {
   internal->next_value_id = 0;
   internal->ptr.Reset(iso, Context::New(iso));
   iso->SetData(0, internal);
+  iso->SetPromiseRejectCallback(OnPromiseReject);
   return iso;
 }
 
@@ -293,7 +373,15 @@ GV8IsolatePtr GV8NewIsolateWithHeapLimit(uint64_t initial_heap_size,
   internal->next_value_id = 0;
   internal->ptr.Reset(iso, Context::New(iso));
   iso->SetData(0, internal);
+  iso->SetPromiseRejectCallback(OnPromiseReject);
   return iso;
+}
+
+void GV8IsolateSetObserverRef(GV8IsolatePtr iso, int ref) {
+  if (iso == nullptr) {
+    return;
+  }
+  iso->SetData(1, reinterpret_cast<void*>(static_cast<intptr_t>(ref)));
 }
 
 void GV8IsolateDispose(GV8IsolatePtr iso) {

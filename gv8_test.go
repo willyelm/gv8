@@ -755,6 +755,112 @@ func TestIsolateHeapStatisticsAndMemoryPressureControls(t *testing.T) {
 	iso.MemoryPressureNotification(gv8.MemoryPressureCritical)
 }
 
+func TestIsolateUnhandledPromiseRejectionObservability(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	events := make(chan gv8.PromiseRejectInfo, 4)
+	iso.SetUnhandledPromiseRejectionHandler(func(info gv8.PromiseRejectInfo) {
+		events <- info
+	})
+
+	if _, err := ctx.RunScript(`Promise.reject(new Error("boom"))`, "promise-reject.js"); err != nil {
+		t.Fatalf("run script: %v", err)
+	}
+	iso.PerformMicrotaskCheckpoint()
+
+	select {
+	case info := <-events:
+		if info.Event != gv8.PromiseRejectWithNoHandler {
+			t.Fatalf("unexpected promise reject event: %v", info.Event)
+		}
+		if info.Error == nil || !strings.Contains(info.Error.Message, "Error: boom") {
+			t.Fatalf("unexpected promise reject error: %#v", info.Error)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for promise rejection hook")
+	}
+
+	snapshot := iso.ObservabilitySnapshot()
+	if snapshot.UnhandledPromiseRejections == 0 {
+		t.Fatalf("expected unhandled promise rejection count to increase")
+	}
+}
+
+func TestIsolateExceptionObservability(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	errorsCh := make(chan *gv8.JSError, 2)
+	iso.SetExceptionHandler(func(err *gv8.JSError) {
+		errorsCh <- err
+	})
+
+	if _, err := ctx.RunScript(`throw new Error("boom")`, "exception.js"); err == nil {
+		t.Fatalf("expected script error")
+	}
+
+	select {
+	case jsErr := <-errorsCh:
+		if jsErr == nil || !strings.Contains(jsErr.Message, "Error: boom") {
+			t.Fatalf("unexpected exception hook value: %#v", jsErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for exception hook")
+	}
+
+	snapshot := iso.ObservabilitySnapshot()
+	if snapshot.Exceptions == 0 {
+		t.Fatalf("expected exception count to increase")
+	}
+}
+
+func TestIsolateModuleResolutionFailureObservability(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	failures := make(chan string, 2)
+	iso.SetModuleResolutionFailureHandler(func(specifier string, referrer string, err error) {
+		failures <- specifier + "|" + referrer + "|" + err.Error()
+	})
+
+	mod, err := iso.CompileModule(`
+		import { answer } from "./dep.js";
+		export const value = answer + 1;
+	`, gv8.ScriptOrigin{ResourceName: "missing.js", IsModule: true})
+	if err != nil {
+		t.Fatalf("compile module: %v", err)
+	}
+	defer mod.Release()
+
+	if err := mod.Instantiate(ctx, nil); err == nil {
+		t.Fatalf("expected instantiate error")
+	}
+
+	select {
+	case failure := <-failures:
+		if !strings.Contains(failure, "./dep.js") {
+			t.Fatalf("unexpected failure hook value: %q", failure)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for module failure hook")
+	}
+
+	snapshot := iso.ObservabilitySnapshot()
+	if snapshot.ModuleResolutionFailures == 0 {
+		t.Fatalf("expected module resolution failure count to increase")
+	}
+}
+
 func TestIntlNumberFormat(t *testing.T) {
 	iso := gv8.NewIsolate()
 	defer iso.Dispose()

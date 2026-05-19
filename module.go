@@ -54,7 +54,7 @@ func compileModule(iso *Isolate, source string, origin ScriptOrigin) (*Module, e
 		C.int(origin.ColumnOffset),
 	)
 	if rtn.ptr == nil {
-		return nil, newJSError(rtn.error)
+		return nil, observeJSError(iso, newJSError(rtn.error))
 	}
 	return &Module{ptr: rtn.ptr, iso: iso, resourceName: origin.ResourceName}, nil
 }
@@ -86,7 +86,7 @@ func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
 	if rtn.msg == nil {
 		return nil
 	}
-	return newJSError(rtn)
+	return observeJSError(ctx.iso, newJSError(rtn))
 }
 
 func (m *Module) Evaluate(ctx *Context) (*Value, error) {
@@ -208,6 +208,7 @@ func gv8ResolveModuleCallback(ctxRef C.int, spec *C.char, referrer C.GV8ModulePt
 	}
 	resolver := ctx.moduleResolverForScript(referrerModule.ScriptID())
 	if resolver == nil {
+		ctx.iso.noteModuleResolutionFailure(C.GoString(spec), referrerModule.ResourceName(), &JSError{Message: "gv8: no module resolver configured"})
 		msg, _ := newErrorValue(ctx, "gv8: no module resolver configured")
 		if msg != nil {
 			return C.GV8ResolvedModule{error_value: msg.ptr}
@@ -220,6 +221,7 @@ func gv8ResolveModuleCallback(ctxRef C.int, spec *C.char, referrer C.GV8ModulePt
 		ctx.bindModuleResolver(mod, resolver)
 		return C.GV8ResolvedModule{module: mod.ptr}
 	}
+	ctx.iso.noteModuleResolutionFailure(C.GoString(spec), referrerModule.ResourceName(), err)
 
 	msg, msgErr := newErrorValue(ctx, "cannot resolve module: "+err.Error())
 	if msgErr != nil {
@@ -236,6 +238,7 @@ func gv8ResolveDynamicImportCallback(ctxRef C.int, spec *C.char, resourceName *C
 	}
 	resolver := ctx.moduleResolverForResource(C.GoString(resourceName))
 	if resolver == nil {
+		ctx.iso.noteModuleResolutionFailure(C.GoString(spec), C.GoString(resourceName), &JSError{Message: "gv8: no dynamic import resolver configured"})
 		msg, _ := newErrorValue(ctx, "gv8: no dynamic import resolver configured")
 		if msg != nil {
 			return C.GV8DynamicImportResult{error_value: msg.ptr}
@@ -245,6 +248,7 @@ func gv8ResolveDynamicImportCallback(ctxRef C.int, spec *C.char, resourceName *C
 
 	dynamicResolver, ok := resolver.(DynamicImportResolver)
 	if !ok {
+		ctx.iso.noteModuleResolutionFailure(C.GoString(spec), C.GoString(resourceName), &JSError{Message: "gv8: module resolver does not support dynamic imports"})
 		msg, _ := newErrorValue(ctx, "gv8: module resolver does not support dynamic imports")
 		if msg != nil {
 			return C.GV8DynamicImportResult{error_value: msg.ptr}
@@ -259,6 +263,7 @@ func gv8ResolveDynamicImportCallback(ctxRef C.int, spec *C.char, resourceName *C
 	if err == nil {
 		err = &JSError{Message: "dynamic import resolver returned nil promise"}
 	}
+	ctx.iso.noteModuleResolutionFailure(C.GoString(spec), C.GoString(resourceName), err)
 
 	msg, msgErr := newErrorValue(ctx, "cannot resolve dynamic import: "+err.Error())
 	if msgErr != nil {

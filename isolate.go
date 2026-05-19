@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 type IsolateOptions struct {
@@ -45,12 +46,51 @@ type HeapStatistics struct {
 	TotalAllocatedBytes     uint64
 }
 
+type PromiseRejectEvent int
+
+const (
+	PromiseRejectWithNoHandler PromiseRejectEvent = iota
+	PromiseHandlerAddedAfterReject
+	PromiseRejectAfterResolved
+	PromiseResolveAfterResolved
+)
+
+type PromiseRejectInfo struct {
+	Event PromiseRejectEvent
+	Error *JSError
+}
+
+type ObservabilitySnapshot struct {
+	UnhandledPromiseRejections uint64
+	Exceptions                 uint64
+	ModuleResolutionFailures   uint64
+}
+
+type UnhandledPromiseRejectionHandler func(PromiseRejectInfo)
+type ExceptionHandler func(*JSError)
+type ModuleResolutionFailureHandler func(specifier string, referrer string, err error)
+
+var (
+	isolateRefsMu  sync.RWMutex
+	isolateRefsSeq int
+	isolateRefs    = map[int]*Isolate{}
+)
+
 type Isolate struct {
 	ptr C.GV8IsolatePtr
+	ref int
 
 	mu          sync.Mutex
 	ownerThread uintptr
 	depth       int
+
+	obMu                          sync.RWMutex
+	unhandledPromiseRejectionHook UnhandledPromiseRejectionHandler
+	exceptionHook                 ExceptionHandler
+	moduleResolutionFailureHook   ModuleResolutionFailureHandler
+	unhandledPromiseRejections    atomic.Uint64
+	exceptions                    atomic.Uint64
+	moduleResolutionFailures      atomic.Uint64
 }
 
 func NewIsolate() *Isolate {
@@ -59,15 +99,19 @@ func NewIsolate() *Isolate {
 
 func NewIsolateWithOptions(options IsolateOptions) *Isolate {
 	initialize()
+	ref := nextIsolateRef()
+	iso := &Isolate{ref: ref}
 	if options.InitialHeapSizeBytes == 0 && options.MaxHeapSizeBytes == 0 {
-		return &Isolate{ptr: C.GV8NewIsolate()}
-	}
-	return &Isolate{
-		ptr: C.GV8NewIsolateWithHeapLimit(
+		iso.ptr = C.GV8NewIsolate()
+	} else {
+		iso.ptr = C.GV8NewIsolateWithHeapLimit(
 			C.uint64_t(options.InitialHeapSizeBytes),
 			C.uint64_t(options.MaxHeapSizeBytes),
-		),
+		)
 	}
+	setIsolateRef(iso)
+	C.GV8IsolateSetObserverRef(iso.ptr, C.int(ref))
+	return iso
 }
 
 func (i *Isolate) Dispose() {
@@ -76,6 +120,7 @@ func (i *Isolate) Dispose() {
 	}
 	release := i.mustEnter()
 	defer release()
+	deleteIsolateRef(i.ref)
 	C.GV8IsolateDispose(i.ptr)
 	i.ptr = nil
 }
@@ -145,6 +190,44 @@ func (i *Isolate) HeapStatistics() HeapStatistics {
 		DetachedContexts:        uint64(stats.number_of_detached_contexts),
 		TotalAllocatedBytes:     uint64(stats.total_allocated_bytes),
 	}
+}
+
+func (i *Isolate) ObservabilitySnapshot() ObservabilitySnapshot {
+	if i == nil {
+		return ObservabilitySnapshot{}
+	}
+	return ObservabilitySnapshot{
+		UnhandledPromiseRejections: i.unhandledPromiseRejections.Load(),
+		Exceptions:                 i.exceptions.Load(),
+		ModuleResolutionFailures:   i.moduleResolutionFailures.Load(),
+	}
+}
+
+func (i *Isolate) SetUnhandledPromiseRejectionHandler(handler UnhandledPromiseRejectionHandler) {
+	if i == nil {
+		return
+	}
+	i.obMu.Lock()
+	defer i.obMu.Unlock()
+	i.unhandledPromiseRejectionHook = handler
+}
+
+func (i *Isolate) SetExceptionHandler(handler ExceptionHandler) {
+	if i == nil {
+		return
+	}
+	i.obMu.Lock()
+	defer i.obMu.Unlock()
+	i.exceptionHook = handler
+}
+
+func (i *Isolate) SetModuleResolutionFailureHandler(handler ModuleResolutionFailureHandler) {
+	if i == nil {
+		return
+	}
+	i.obMu.Lock()
+	defer i.obMu.Unlock()
+	i.moduleResolutionFailureHook = handler
 }
 
 func (i *Isolate) TerminateOnContextDone(ctx context.Context) func() {
@@ -222,4 +305,96 @@ func (i *Isolate) leave() {
 	if i.depth == 0 {
 		i.ownerThread = 0
 	}
+}
+
+func (i *Isolate) noteUnhandledPromiseRejection(event PromiseRejectEvent, err *JSError) {
+	if i == nil {
+		return
+	}
+	i.unhandledPromiseRejections.Add(1)
+	i.obMu.RLock()
+	handler := i.unhandledPromiseRejectionHook
+	i.obMu.RUnlock()
+	if handler != nil {
+		handler(PromiseRejectInfo{Event: event, Error: err})
+	}
+}
+
+func (i *Isolate) noteException(err *JSError) {
+	if i == nil {
+		return
+	}
+	i.exceptions.Add(1)
+	i.obMu.RLock()
+	handler := i.exceptionHook
+	i.obMu.RUnlock()
+	if handler != nil {
+		handler(err)
+	}
+}
+
+func (i *Isolate) noteModuleResolutionFailure(specifier string, referrer string, err error) {
+	if i == nil {
+		return
+	}
+	i.moduleResolutionFailures.Add(1)
+	i.obMu.RLock()
+	handler := i.moduleResolutionFailureHook
+	i.obMu.RUnlock()
+	if handler != nil {
+		handler(specifier, referrer, err)
+	}
+}
+
+func nextIsolateRef() int {
+	isolateRefsMu.Lock()
+	defer isolateRefsMu.Unlock()
+	isolateRefsSeq++
+	return isolateRefsSeq
+}
+
+func setIsolateRef(iso *Isolate) {
+	isolateRefsMu.Lock()
+	defer isolateRefsMu.Unlock()
+	isolateRefs[iso.ref] = iso
+}
+
+func deleteIsolateRef(ref int) {
+	isolateRefsMu.Lock()
+	defer isolateRefsMu.Unlock()
+	delete(isolateRefs, ref)
+}
+
+func getIsolateRef(ref int) *Isolate {
+	isolateRefsMu.RLock()
+	defer isolateRefsMu.RUnlock()
+	return isolateRefs[ref]
+}
+
+//export gv8PromiseRejectCallback
+func gv8PromiseRejectCallback(isolateRef C.int, event C.int, errorInfo C.GV8RtnError) {
+	iso := getIsolateRef(int(isolateRef))
+	if iso == nil {
+		_ = newJSError(errorInfo)
+		return
+	}
+	var jsErr *JSError
+	if err := newJSError(errorInfo); err != nil {
+		jsErr, _ = err.(*JSError)
+	}
+	iso.noteUnhandledPromiseRejection(PromiseRejectEvent(event), jsErr)
+}
+
+//export gv8ExceptionMessageCallback
+func gv8ExceptionMessageCallback(isolateRef C.int, errorInfo C.GV8RtnError) {
+	iso := getIsolateRef(int(isolateRef))
+	if iso == nil {
+		_ = newJSError(errorInfo)
+		return
+	}
+	var jsErr *JSError
+	if err := newJSError(errorInfo); err != nil {
+		jsErr, _ = err.(*JSError)
+	}
+	iso.noteException(jsErr)
 }

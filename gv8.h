@@ -91,6 +91,7 @@ extern void GV8Init();
 extern GV8IsolatePtr GV8NewIsolate();
 extern GV8IsolatePtr GV8NewIsolateWithHeapLimit(uint64_t initial_heap_size,
                                                 uint64_t max_heap_size);
+extern void GV8IsolateSetObserverRef(GV8IsolatePtr iso, int ref);
 extern void GV8IsolateDispose(GV8IsolatePtr iso);
 extern void GV8IsolatePerformMicrotaskCheckpoint(GV8IsolatePtr iso);
 extern void GV8IsolateTerminateExecution(GV8IsolatePtr iso);
@@ -187,6 +188,10 @@ extern GV8CallbackResult gv8FunctionCallback(int ctx_ref,
                                              GV8ValuePtr recv,
                                              int argc,
                                              GV8ValuePtr* argv);
+extern void gv8PromiseRejectCallback(int isolate_ref,
+                                     int event,
+                                     GV8RtnError error);
+extern void gv8ExceptionMessageCallback(int isolate_ref, GV8RtnError error);
 
 #ifdef __cplusplus
 }
