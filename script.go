@@ -6,6 +6,8 @@ import "C"
 
 import "unsafe"
 
+// UnboundScript is a compiled script that can be run in a context belonging to
+// the same isolate.
 type UnboundScript struct {
 	ptr C.GV8UnboundScriptPtr
 	iso *Isolate
@@ -36,6 +38,7 @@ func compileUnboundScript(iso *Isolate, source string, origin ScriptOrigin) (*Un
 	return &UnboundScript{ptr: rtn.ptr, iso: iso}, nil
 }
 
+// Release frees the underlying compiled script handle.
 func (s *UnboundScript) Release() {
 	if s == nil || s.ptr == nil {
 		return
@@ -46,6 +49,7 @@ func (s *UnboundScript) Release() {
 	s.ptr = nil
 }
 
+// Run binds the script to ctx and executes it.
 func (s *UnboundScript) Run(ctx *Context) (*Value, error) {
 	if s == nil || s.ptr == nil {
 		return nil, &JSError{Message: "gv8: script is no longer valid"}

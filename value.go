@@ -6,6 +6,7 @@ import "C"
 
 import "unsafe"
 
+// Value is the base wrapper for V8 values that belong to a Context.
 type Value struct {
 	ptr C.GV8ValuePtr
 	ctx *Context
@@ -46,11 +47,13 @@ func (v *Value) Release() {
 	v.ptr = nil
 }
 
+// Deprecated: prefer StringValue so conversion failure remains explicit.
 func (v *Value) String() string {
 	value, _ := v.StringValue()
 	return value
 }
 
+// StringValue converts the value to a string and reports conversion errors.
 func (v *Value) StringValue() (string, error) {
 	if !v.valid() {
 		return "", &JSError{Message: "gv8: value is no longer valid"}

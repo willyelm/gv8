@@ -9,6 +9,7 @@ import (
 	"unsafe"
 )
 
+// Module is a compiled ECMAScript module bound to an isolate.
 type Module struct {
 	ptr          C.GV8ModulePtr
 	iso          *Isolate
@@ -69,6 +70,7 @@ func (m *Module) Release() {
 	m.ptr = nil
 }
 
+// Instantiate links the module using resolver.
 func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
 	if m == nil || m.ptr == nil {
 		return &JSError{Message: "gv8: module is no longer valid"}
@@ -89,6 +91,7 @@ func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
 	return observeJSError(ctx.iso, newJSError(rtn))
 }
 
+// Evaluate evaluates the already instantiated module.
 func (m *Module) Evaluate(ctx *Context) (*Value, error) {
 	if m == nil || m.ptr == nil {
 		return nil, &JSError{Message: "gv8: module is no longer valid"}
@@ -115,6 +118,8 @@ func (m *Module) EnsureInstantiated(ctx *Context, resolver ModuleResolver) error
 	return m.Instantiate(ctx, resolver)
 }
 
+// Deprecated: prefer explicit Instantiate followed by Evaluate so lifecycle
+// stages remain visible.
 func (m *Module) InstantiateAndEvaluate(ctx *Context, resolver ModuleResolver, pump func(context.Context) error) (*Value, error) {
 	if err := m.EnsureInstantiated(ctx, resolver); err != nil {
 		return nil, err
@@ -130,6 +135,8 @@ func (m *Module) InstantiateAndEvaluate(ctx *Context, resolver ModuleResolver, p
 	return value.Promise().Await(context.Background(), pump)
 }
 
+// Deprecated: prefer explicit Evaluate followed by Namespace so lifecycle
+// stages remain visible.
 func (m *Module) EvaluateNamespace(ctx *Context, pump func(context.Context) error) (*Object, error) {
 	value, err := m.Evaluate(ctx)
 	if err != nil {
@@ -143,6 +150,8 @@ func (m *Module) EvaluateNamespace(ctx *Context, pump func(context.Context) erro
 	return m.Namespace(ctx), nil
 }
 
+// Deprecated: prefer explicit Instantiate, Evaluate, and Namespace calls so
+// lifecycle stages remain visible.
 func (m *Module) ReadyNamespace(ctx *Context, resolver ModuleResolver, pump func(context.Context) error) (*Object, error) {
 	if err := m.EnsureInstantiated(ctx, resolver); err != nil {
 		return nil, err

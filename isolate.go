@@ -76,6 +76,7 @@ var (
 	isolateRefs    = map[int]*Isolate{}
 )
 
+// Isolate is the root ownership boundary for all V8 state created through gv8.
 type Isolate struct {
 	ptr C.GV8IsolatePtr
 	ref int
@@ -93,10 +94,12 @@ type Isolate struct {
 	moduleResolutionFailures      atomic.Uint64
 }
 
+// NewIsolate creates an isolate with default heap settings.
 func NewIsolate() *Isolate {
 	return NewIsolateWithOptions(IsolateOptions{})
 }
 
+// NewIsolateWithOptions creates an isolate with explicit heap options.
 func NewIsolateWithOptions(options IsolateOptions) *Isolate {
 	initialize()
 	ref := nextIsolateRef()

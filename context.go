@@ -29,6 +29,7 @@ type Context struct {
 	moduleResolversByName   map[string]ModuleResolver
 }
 
+// NewContext creates a new V8 context owned by iso.
 func NewContext(iso *Isolate) *Context {
 	if iso == nil {
 		panic("gv8: nil isolate")
@@ -70,6 +71,8 @@ func getContext(ref int) *Context {
 	return ctxRefs[ref]
 }
 
+// Close releases the native context and invalidates any live values created
+// from it.
 func (c *Context) Close() {
 	if c == nil || c.ptr == nil {
 		return
@@ -211,6 +214,7 @@ func (c *Context) Isolate() *Isolate {
 	return c.iso
 }
 
+// Global returns the global object for the context.
 func (c *Context) Global() *Object {
 	if c == nil || c.isClosed() {
 		return nil
@@ -220,6 +224,8 @@ func (c *Context) Global() *Object {
 	return &Object{Value: newValue(c, C.GV8ContextGlobal(c.ptr))}
 }
 
+// Deprecated: prefer Global().Get(name) so global-object ownership remains
+// explicit at the callsite.
 func (c *Context) GetGlobal(name string) (*Value, error) {
 	if err := c.ensureOpen(); err != nil {
 		return nil, err
@@ -229,6 +235,8 @@ func (c *Context) GetGlobal(name string) (*Value, error) {
 	return global.Get(name)
 }
 
+// Deprecated: prefer Global().Set(name, value) so global-object ownership
+// remains explicit at the callsite.
 func (c *Context) SetGlobal(name string, value any) error {
 	if err := c.ensureOpen(); err != nil {
 		return err
@@ -238,6 +246,8 @@ func (c *Context) SetGlobal(name string, value any) error {
 	return global.Set(name, value)
 }
 
+// Deprecated: prefer repeated explicit Global().Set calls so ownership and
+// failure points stay visible.
 func (c *Context) SetGlobals(values map[string]any) error {
 	if err := c.ensureOpen(); err != nil {
 		return err
@@ -250,6 +260,8 @@ func (c *Context) SetGlobals(values map[string]any) error {
 	return nil
 }
 
+// Deprecated: prefer NewFunction plus Global().Set so function lifetime stays
+// explicit.
 func (c *Context) Bind(name string, fn HostFunction) error {
 	hostFn, err := NewFunction(c, fn)
 	if err != nil {
@@ -259,6 +271,7 @@ func (c *Context) Bind(name string, fn HostFunction) error {
 	return c.SetGlobal(name, hostFn)
 }
 
+// NewObject allocates a new object in the context.
 func (c *Context) NewObject() (*Object, error) {
 	if err := c.ensureOpen(); err != nil {
 		return nil, err
@@ -276,6 +289,7 @@ func (c *Context) NewObject() (*Object, error) {
 	return value.Object(), nil
 }
 
+// RunScript compiles and executes source in the context.
 func (c *Context) RunScript(source string, origin string) (*Value, error) {
 	if err := c.ensureOpen(); err != nil {
 		return nil, err
