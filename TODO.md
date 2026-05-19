@@ -23,10 +23,10 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Replace panic-based conversion paths with error-returning APIs or safe variants.
 - [x] Normalize JS exception reporting through `JSError`.
 
-[ ] 5. Harden promise and microtask execution
-- [ ] Replace busy-spin `Await()` with a host-driven wait strategy.
-- [ ] Expose a simple event-loop or pump contract.
-- [ ] Support timeout and cancellation without burning CPU.
+[x] 5. Harden promise and microtask execution
+- [x] Replace busy-spin `Await()` with a host-driven wait strategy.
+- [x] Expose a simple event-loop or pump contract.
+- [x] Support timeout and cancellation without burning CPU.
 
 [ ] 6. Isolate module loading state
 - [ ] Stop storing one mutable resolver on `Context`.

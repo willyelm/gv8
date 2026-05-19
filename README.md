@@ -35,6 +35,20 @@ Current support includes:
   failure instead of panicking.
 - Promise rejection surfaced by `Promise.Await()` is returned as `JSError`.
 
+## Promise Waiting
+
+`Promise.Await()` is safe for server runtimes by default.
+
+- It performs a microtask checkpoint before each wait iteration.
+- It does not busy-spin when no host pump is provided.
+- It honors context cancellation and deadlines.
+- The `pump` callback is the host event-loop integration point.
+
+If you need more control, `Promise.AwaitWithOptions()` lets you provide:
+
+- a `Pump` callback for host-driven progress
+- a `PollInterval` for default wait behavior when no pump is used
+
 ## Threading
 
 `gv8` uses an externally synchronized isolate model.
