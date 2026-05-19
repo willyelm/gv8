@@ -1390,3 +1390,163 @@ func TestArrayBufferBytes(t *testing.T) {
 		t.Fatalf("unexpected bytes: %q", got)
 	}
 }
+
+func TestServerRuntimeEssentials(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	hostCalls := 0
+	if err := ctx.Bind("hostAdd", func(info *gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+		hostCalls++
+		args := info.Args()
+		return gv8.NewIntegerValue(info.Context(), args[0].Integer()+args[1].Integer())
+	}); err != nil {
+		t.Fatalf("bind hostAdd: %v", err)
+	}
+
+	resolver := &testResolver{
+		modules: map[string]string{
+			"./static.js":  `export const base = hostAdd(20, 1);`,
+			"./dynamic.js": `export const extra = 21;`,
+		},
+	}
+
+	mod, err := iso.CompileModule(`
+		import { base } from "./static.js";
+
+		const dynamic = await import("./dynamic.js");
+		const payload = JSON.parse('{"tag":"server-runtime","ok":true}');
+		const bytes = new Uint8Array([base, dynamic.extra]);
+
+		export const result = {
+			total: base + dynamic.extra,
+			tag: payload.tag,
+			bytes,
+		};
+	`, gv8.ScriptOrigin{
+		ResourceName: "server-runtime.js",
+		IsModule:     true,
+	})
+	if err != nil {
+		t.Fatalf("compile module: %v", err)
+	}
+	defer mod.Release()
+
+	if err := mod.Instantiate(ctx, resolver); err != nil {
+		t.Fatalf("instantiate module: %v", err)
+	}
+
+	value, err := mod.Evaluate(ctx)
+	if err != nil {
+		t.Fatalf("evaluate module: %v", err)
+	}
+	if value != nil {
+		defer value.Release()
+	}
+	if value == nil || !value.IsPromise() {
+		t.Fatalf("expected top-level await promise")
+	}
+
+	modulePromise := value.Promise()
+	defer modulePromise.Release()
+	for i := 0; i < 100 && modulePromise.State() == gv8.PromisePending; i++ {
+		iso.PerformMicrotaskCheckpoint()
+	}
+
+	if hostCalls != 1 {
+		t.Fatalf("unexpected host callback count: got %d want 1", hostCalls)
+	}
+	if got := modulePromise.State(); got != gv8.PromiseFulfilled {
+		t.Fatalf("unexpected module promise state: %v", got)
+	}
+
+	result, err := mod.Namespace(ctx).Get("result")
+	if err != nil {
+		t.Fatalf("get result export: %v", err)
+	}
+	defer result.Release()
+
+	resultObject := result.Object()
+	total, err := resultObject.Get("total")
+	if err != nil {
+		t.Fatalf("get total: %v", err)
+	}
+	defer total.Release()
+	if got := total.Integer(); got != 42 {
+		t.Fatalf("unexpected total: got %d want 42", got)
+	}
+
+	tag, err := resultObject.Get("tag")
+	if err != nil {
+		t.Fatalf("get tag: %v", err)
+	}
+	defer tag.Release()
+	if got := tag.String(); got != "server-runtime" {
+		t.Fatalf("unexpected tag: %q", got)
+	}
+
+	bytesValue, err := resultObject.Get("bytes")
+	if err != nil {
+		t.Fatalf("get bytes: %v", err)
+	}
+	defer bytesValue.Release()
+
+	bytes, err := bytesValue.Bytes()
+	if err != nil {
+		t.Fatalf("bytes: %v", err)
+	}
+	if len(bytes) != 2 || bytes[0] != 21 || bytes[1] != 21 {
+		t.Fatalf("unexpected bytes: %#v", bytes)
+	}
+
+	jsonValue, err := gv8.JSONParse(ctx, `{"mode":"server-runtime","count":42}`)
+	if err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	defer jsonValue.Release()
+
+	jsonText, err := gv8.JSONStringify(ctx, jsonValue)
+	if err != nil {
+		t.Fatalf("json stringify: %v", err)
+	}
+	for _, want := range []string{`"mode":"server-runtime"`, `"count":42`} {
+		if !strings.Contains(jsonText, want) {
+			t.Fatalf("stringify missing %s in %s", want, jsonText)
+		}
+	}
+
+	resolverPromise, err := gv8.NewPromiseResolver(ctx)
+	if err != nil {
+		t.Fatalf("new promise resolver: %v", err)
+	}
+	defer resolverPromise.Release()
+
+	doneValue, err := gv8.NewStringValue(ctx, "done")
+	if err != nil {
+		t.Fatalf("new string: %v", err)
+	}
+	defer doneValue.Release()
+
+	pumpCalls := 0
+	awaited, err := resolverPromise.Promise().Await(context.Background(), func(context.Context) error {
+		pumpCalls++
+		if pumpCalls == 2 {
+			return resolverPromise.Resolve(doneValue)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("await resolver promise: %v", err)
+	}
+	defer awaited.Release()
+
+	if pumpCalls != 2 {
+		t.Fatalf("unexpected await pump count: got %d want 2", pumpCalls)
+	}
+	if got := awaited.String(); got != "done" {
+		t.Fatalf("unexpected awaited value: %q", got)
+	}
+}
