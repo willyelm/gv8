@@ -6,6 +6,7 @@ import "C"
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 type PromiseState int
@@ -23,6 +24,13 @@ type Promise struct {
 type PromiseResolver struct {
 	*Value
 }
+
+type AwaitOptions struct {
+	Pump         func(context.Context) error
+	PollInterval time.Duration
+}
+
+const defaultPromiseAwaitPollInterval = time.Millisecond
 
 func NewPromiseResolver(ctx *Context) (*PromiseResolver, error) {
 	if err := ctx.ensureOpen(); err != nil {
@@ -99,8 +107,17 @@ func (p *Promise) Result() *Value {
 }
 
 func (p *Promise) Await(ctx context.Context, pump func(context.Context) error) (*Value, error) {
+	return p.AwaitWithOptions(ctx, AwaitOptions{Pump: pump})
+}
+
+func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*Value, error) {
 	if p == nil {
 		return nil, errors.New("gv8: nil promise")
+	}
+
+	pollInterval := options.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = defaultPromiseAwaitPollInterval
 	}
 
 	for {
@@ -112,19 +129,33 @@ func (p *Promise) Await(ctx context.Context, pump func(context.Context) error) (
 			break
 		}
 
-		if pump == nil {
-			if ctx != nil {
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				default:
-				}
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+
+		if options.Pump != nil {
+			if err := options.Pump(ctx); err != nil {
+				return nil, err
 			}
 			continue
 		}
 
-		if err := pump(ctx); err != nil {
-			return nil, err
+		timer := time.NewTimer(pollInterval)
+		if ctx == nil {
+			<-timer.C
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
 		}
 	}
 

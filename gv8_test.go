@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/willyelm/gv8"
 )
@@ -779,6 +780,75 @@ func TestPromiseAwait(t *testing.T) {
 
 	if got := result.String(); got != "done" {
 		t.Fatalf("unexpected promise result: %q", got)
+	}
+}
+
+func TestPromiseAwaitUsesPumpContract(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	resolver, err := gv8.NewPromiseResolver(ctx)
+	if err != nil {
+		t.Fatalf("new promise resolver: %v", err)
+	}
+	defer resolver.Release()
+
+	value, err := gv8.NewStringValue(ctx, "done")
+	if err != nil {
+		t.Fatalf("new string: %v", err)
+	}
+	defer value.Release()
+
+	calls := 0
+	result, err := resolver.Promise().Await(context.Background(), func(context.Context) error {
+		calls++
+		if calls == 3 {
+			return resolver.Resolve(value)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("await promise: %v", err)
+	}
+	defer result.Release()
+
+	if calls != 3 {
+		t.Fatalf("unexpected pump call count: got %d want 3", calls)
+	}
+	if got := result.String(); got != "done" {
+		t.Fatalf("unexpected promise result: %q", got)
+	}
+}
+
+func TestPromiseAwaitHonorsContextTimeout(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	resolver, err := gv8.NewPromiseResolver(ctx)
+	if err != nil {
+		t.Fatalf("new promise resolver: %v", err)
+	}
+	defer resolver.Release()
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = resolver.Promise().Await(waitCtx, nil)
+	if err == nil {
+		t.Fatalf("expected timeout")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 5*time.Millisecond {
+		t.Fatalf("await returned too quickly: %s", elapsed)
 	}
 }
 
