@@ -176,7 +176,11 @@ func TestHostFunctionCanReturnCallbackArgument(t *testing.T) {
 	}
 	defer value.Release()
 
-	if got := value.String(); got != "ok" {
+	got, err := value.StringValue()
+	if err != nil {
+		t.Fatalf("string value: %v", err)
+	}
+	if got != "ok" {
 		t.Fatalf("unexpected callback result: %q", got)
 	}
 }
@@ -190,7 +194,11 @@ func TestMixedLifecycleStressDoesNotLeakOrBreakTeardown(t *testing.T) {
 		ctx := NewContext(iso)
 
 		fn, err := NewFunction(ctx, func(info *FunctionCallbackInfo) (*Value, error) {
-			return NewStringValue(info.Context(), info.Args()[0].String())
+			s, err := info.Args()[0].StringValue()
+			if err != nil {
+				return nil, err
+			}
+			return NewStringValue(info.Context(), s)
 		})
 		if err != nil {
 			t.Fatalf("new function: %v", err)
@@ -206,14 +214,18 @@ func TestMixedLifecycleStressDoesNotLeakOrBreakTeardown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run script: %v", err)
 		}
-		if got := scriptValue.String(); got != "ok" {
+		got, err := scriptValue.StringValue()
+		if err != nil {
+			t.Fatalf("string value: %v", err)
+		}
+		if got != "ok" {
 			t.Fatalf("unexpected script value: %q", got)
 		}
 		scriptValue.Release()
 
 		mod, err := iso.CompileModule(`
 			export const value = await import("./dep.js").then((mod) => mod.answer + 1);
-		`, ScriptOrigin{ResourceName: "stress-mod.js", IsModule: true})
+		`, ScriptOrigin{ResourceName: "stress-mod.js"})
 		if err != nil {
 			t.Fatalf("compile module: %v", err)
 		}
@@ -224,10 +236,17 @@ func TestMixedLifecycleStressDoesNotLeakOrBreakTeardown(t *testing.T) {
 		if err := mod.Instantiate(ctx, resolver); err != nil {
 			t.Fatalf("instantiate module: %v", err)
 		}
-		namespace, err := mod.ReadyNamespace(ctx, resolver, nil)
+		evalResult, err := mod.Evaluate(ctx)
 		if err != nil {
-			t.Fatalf("ready namespace: %v", err)
+			t.Fatalf("evaluate module: %v", err)
 		}
+		if evalResult != nil && evalResult.IsPromise() {
+			if _, err := evalResult.Promise().Await(context.Background(), nil); err != nil {
+				t.Fatalf("await module: %v", err)
+			}
+			evalResult.Release()
+		}
+		namespace := mod.Namespace(ctx)
 		value, err := namespace.Get("value")
 		if err != nil {
 			t.Fatalf("get export: %v", err)
@@ -253,8 +272,12 @@ func TestMixedLifecycleStressDoesNotLeakOrBreakTeardown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("await promise: %v", err)
 		}
-		if got := awaited.String(); got != "done" {
-			t.Fatalf("unexpected awaited value: %q", got)
+		got2, err := awaited.StringValue()
+		if err != nil {
+			t.Fatalf("string value: %v", err)
+		}
+		if got2 != "done" {
+			t.Fatalf("unexpected awaited value: %q", got2)
 		}
 		awaited.Release()
 		promiseValue.Release()
@@ -288,10 +311,7 @@ func (r *stressResolver) ResolveModule(ctx *Context, specifier string, _ *Module
 	if !ok {
 		return nil, &JSError{Message: "module not found"}
 	}
-	return ctx.Isolate().CompileModule(source, ScriptOrigin{
-		ResourceName: specifier,
-		IsModule:     true,
-	})
+	return ctx.Isolate().CompileModule(source, ScriptOrigin{ResourceName: specifier})
 }
 
 func (r *stressResolver) ResolveDynamicImport(ctx *Context, specifier string, _ string) (*Promise, error) {
