@@ -43,9 +43,9 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Surface unhandled promise rejections.
 - [x] Add optional hooks for exceptions and resolver failures.
 
-[ ] 9. Tighten API shape around the simple core
-- [ ] Keep the surface focused on `Isolate`, `Context`, `Script`, `Module`, `Value`, `Function`, and `Promise`.
-- [ ] Prefer explicit ownership over convenience APIs that hide lifecycle rules.
+[x] 9. Tighten API shape around the simple core
+- [x] Keep the surface focused on `Isolate`, `Context`, `Script`, `Module`, `Value`, `Function`, and `Promise`.
+- [x] Prefer explicit ownership over convenience APIs that hide lifecycle rules.
 
 [ ] 10. Support server-runtime essentials only
 - [ ] Stable host function callbacks.

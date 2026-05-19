@@ -13,6 +13,39 @@ runtime layer. The core API is built around:
 - `ModuleResolver`
 - `JSError`
 
+## Core API
+
+The intended long-lived embedding surface is:
+
+- `Isolate`
+- `Context`
+- `UnboundScript`
+- `Module`
+- `Value`
+- `Function`
+- `Promise`
+
+These are the APIs to prefer when building a host runtime.
+
+## Convenience APIs
+
+Some helpers remain available for ergonomics, but they are secondary to the
+core ownership-first API shape.
+
+Examples:
+
+- `Context.GetGlobal`
+- `Context.SetGlobal`
+- `Context.SetGlobals`
+- `Context.Bind`
+- `Value.String`
+- `Module.InstantiateAndEvaluate`
+- `Module.EvaluateNamespace`
+- `Module.ReadyNamespace`
+
+Prefer the explicit forms that keep lifecycle and ownership visible at the
+callsite.
+
 Current support includes:
 
 - script compilation and execution
