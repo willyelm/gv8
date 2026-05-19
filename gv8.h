@@ -70,10 +70,35 @@ typedef struct {
   GV8RtnError error;
 } GV8RtnBytes;
 
+typedef struct {
+  uint64_t total_heap_size;
+  uint64_t total_heap_size_executable;
+  uint64_t total_physical_size;
+  uint64_t total_available_size;
+  uint64_t total_global_handles_size;
+  uint64_t used_global_handles_size;
+  uint64_t used_heap_size;
+  uint64_t heap_size_limit;
+  uint64_t malloced_memory;
+  uint64_t external_memory;
+  uint64_t peak_malloced_memory;
+  uint64_t number_of_native_contexts;
+  uint64_t number_of_detached_contexts;
+  uint64_t total_allocated_bytes;
+} GV8HeapStatistics;
+
 extern void GV8Init();
 extern GV8IsolatePtr GV8NewIsolate();
+extern GV8IsolatePtr GV8NewIsolateWithHeapLimit(uint64_t initial_heap_size,
+                                                uint64_t max_heap_size);
 extern void GV8IsolateDispose(GV8IsolatePtr iso);
 extern void GV8IsolatePerformMicrotaskCheckpoint(GV8IsolatePtr iso);
+extern void GV8IsolateTerminateExecution(GV8IsolatePtr iso);
+extern int GV8IsolateIsExecutionTerminating(GV8IsolatePtr iso);
+extern void GV8IsolateCancelTerminateExecution(GV8IsolatePtr iso);
+extern void GV8IsolateLowMemoryNotification(GV8IsolatePtr iso);
+extern void GV8IsolateMemoryPressureNotification(GV8IsolatePtr iso, int level);
+extern GV8HeapStatistics GV8IsolateGetHeapStatistics(GV8IsolatePtr iso);
 
 extern GV8ContextPtr GV8NewContext(GV8IsolatePtr iso, int ref);
 extern void GV8ContextDispose(GV8ContextPtr ctx);

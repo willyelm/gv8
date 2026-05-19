@@ -275,6 +275,27 @@ GV8IsolatePtr GV8NewIsolate() {
   return iso;
 }
 
+GV8IsolatePtr GV8NewIsolateWithHeapLimit(uint64_t initial_heap_size,
+                                         uint64_t max_heap_size) {
+  Isolate::CreateParams params;
+  params.array_buffer_allocator = default_allocator;
+  if (initial_heap_size > 0 || max_heap_size > 0) {
+    params.constraints.ConfigureDefaultsFromHeapSize(
+        static_cast<size_t>(initial_heap_size), static_cast<size_t>(max_heap_size));
+  }
+  Isolate* iso = Isolate::New(params);
+  iso->SetHostImportModuleDynamicallyCallback(DynamicImportCallback);
+  ISO_SCOPE(iso)
+
+  gv8_ctx* internal = new gv8_ctx;
+  internal->iso = iso;
+  internal->ref = 0;
+  internal->next_value_id = 0;
+  internal->ptr.Reset(iso, Context::New(iso));
+  iso->SetData(0, internal);
+  return iso;
+}
+
 void GV8IsolateDispose(GV8IsolatePtr iso) {
   if (iso == nullptr) {
     return;
@@ -286,6 +307,85 @@ void GV8IsolateDispose(GV8IsolatePtr iso) {
 void GV8IsolatePerformMicrotaskCheckpoint(GV8IsolatePtr iso) {
   ISO_SCOPE(iso)
   iso->PerformMicrotaskCheckpoint();
+}
+
+void GV8IsolateTerminateExecution(GV8IsolatePtr iso) {
+  if (iso == nullptr) {
+    return;
+  }
+  iso->TerminateExecution();
+}
+
+int GV8IsolateIsExecutionTerminating(GV8IsolatePtr iso) {
+  if (iso == nullptr) {
+    return 0;
+  }
+  return iso->IsExecutionTerminating() ? 1 : 0;
+}
+
+void GV8IsolateCancelTerminateExecution(GV8IsolatePtr iso) {
+  if (iso == nullptr) {
+    return;
+  }
+  iso->CancelTerminateExecution();
+}
+
+void GV8IsolateLowMemoryNotification(GV8IsolatePtr iso) {
+  if (iso == nullptr) {
+    return;
+  }
+  ISO_SCOPE(iso)
+  iso->LowMemoryNotification();
+}
+
+void GV8IsolateMemoryPressureNotification(GV8IsolatePtr iso, int level) {
+  if (iso == nullptr) {
+    return;
+  }
+  ISO_SCOPE(iso)
+  MemoryPressureLevel pressure = MemoryPressureLevel::kNone;
+  switch (level) {
+    case 1:
+      pressure = MemoryPressureLevel::kModerate;
+      break;
+    case 2:
+      pressure = MemoryPressureLevel::kCritical;
+      break;
+    default:
+      break;
+  }
+  iso->MemoryPressureNotification(pressure);
+}
+
+GV8HeapStatistics GV8IsolateGetHeapStatistics(GV8IsolatePtr iso) {
+  GV8HeapStatistics rtn = {};
+  if (iso == nullptr) {
+    return rtn;
+  }
+  ISO_SCOPE(iso)
+  HeapStatistics stats;
+  iso->GetHeapStatistics(&stats);
+  rtn.total_heap_size = static_cast<uint64_t>(stats.total_heap_size());
+  rtn.total_heap_size_executable =
+      static_cast<uint64_t>(stats.total_heap_size_executable());
+  rtn.total_physical_size = static_cast<uint64_t>(stats.total_physical_size());
+  rtn.total_available_size = static_cast<uint64_t>(stats.total_available_size());
+  rtn.total_global_handles_size =
+      static_cast<uint64_t>(stats.total_global_handles_size());
+  rtn.used_global_handles_size =
+      static_cast<uint64_t>(stats.used_global_handles_size());
+  rtn.used_heap_size = static_cast<uint64_t>(stats.used_heap_size());
+  rtn.heap_size_limit = static_cast<uint64_t>(stats.heap_size_limit());
+  rtn.malloced_memory = static_cast<uint64_t>(stats.malloced_memory());
+  rtn.external_memory = static_cast<uint64_t>(stats.external_memory());
+  rtn.peak_malloced_memory = static_cast<uint64_t>(stats.peak_malloced_memory());
+  rtn.number_of_native_contexts =
+      static_cast<uint64_t>(stats.number_of_native_contexts());
+  rtn.number_of_detached_contexts =
+      static_cast<uint64_t>(stats.number_of_detached_contexts());
+  rtn.total_allocated_bytes =
+      static_cast<uint64_t>(stats.total_allocated_bytes());
+  return rtn;
 }
 
 GV8ContextPtr GV8NewContext(GV8IsolatePtr iso, int ref) {

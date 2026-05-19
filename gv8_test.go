@@ -648,6 +648,113 @@ func TestConcurrentAccessRequiresExternalSynchronization(t *testing.T) {
 	}
 }
 
+func TestIsolateTerminateExecution(t *testing.T) {
+	prev := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(prev)
+
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	started := make(chan struct{}, 1)
+	if err := ctx.Bind("tick", func(*gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("bind tick: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := ctx.RunScript(`while (true) { tick() }`, "terminate.js")
+		done <- err
+	}()
+
+	<-started
+	iso.TerminateExecution()
+
+	err := <-done
+	if err == nil {
+		t.Fatalf("expected termination error")
+	}
+
+	iso.CancelTerminateExecution()
+
+	value, err := ctx.RunScript("40 + 2", "after-terminate.js")
+	if err != nil {
+		t.Fatalf("run script after cancel terminate: %v", err)
+	}
+	defer value.Release()
+
+	if got := value.Integer(); got != 42 {
+		t.Fatalf("unexpected result after cancel terminate: got %d want 42", got)
+	}
+}
+
+func TestIsolateTerminateOnContextDone(t *testing.T) {
+	prev := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(prev)
+
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	started := make(chan struct{}, 1)
+	if err := ctx.Bind("tick", func(*gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("bind tick: %v", err)
+	}
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	stopWatchdog := iso.TerminateOnContextDone(waitCtx)
+	defer stopWatchdog()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := ctx.RunScript(`while (true) { tick() }`, "watchdog.js")
+		done <- err
+	}()
+
+	<-started
+
+	err := <-done
+	if err == nil {
+		t.Fatalf("expected watchdog termination error")
+	}
+
+	iso.CancelTerminateExecution()
+}
+
+func TestIsolateHeapStatisticsAndMemoryPressureControls(t *testing.T) {
+	iso := gv8.NewIsolateWithOptions(gv8.IsolateOptions{
+		InitialHeapSizeBytes: 8 << 20,
+		MaxHeapSizeBytes:     32 << 20,
+	})
+	defer iso.Dispose()
+
+	stats := iso.HeapStatistics()
+	if stats.HeapSizeLimit == 0 {
+		t.Fatalf("expected non-zero heap size limit")
+	}
+
+	iso.LowMemoryNotification()
+	iso.MemoryPressureNotification(gv8.MemoryPressureModerate)
+	iso.MemoryPressureNotification(gv8.MemoryPressureCritical)
+}
+
 func TestIntlNumberFormat(t *testing.T) {
 	iso := gv8.NewIsolate()
 	defer iso.Dispose()
