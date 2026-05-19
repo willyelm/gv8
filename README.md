@@ -24,6 +24,17 @@ Current support includes:
 - JSON helpers
 - promise resolution and awaiting
 
+## Error Handling
+
+`gv8` reports JavaScript exceptions as `JSError`.
+
+- APIs that already return `error` use `JSError` for V8 exceptions.
+- `Value.StringValue()` returns `(string, error)` and reports conversion
+  failures as `JSError`.
+- `Value.String()` is a convenience helper that returns `""` on conversion
+  failure instead of panicking.
+- Promise rejection surfaced by `Promise.Await()` is returned as `JSError`.
+
 ## Threading
 
 `gv8` uses an externally synchronized isolate model.

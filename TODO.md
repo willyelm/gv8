@@ -19,9 +19,9 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Enforce the contract in Go with runtime checks.
 - [x] Document which operations are safe concurrently.
 
-[ ] 4. Make error behavior non-panicking
-- [ ] Replace panic-based conversion paths with error-returning APIs or safe variants.
-- [ ] Normalize JS exception reporting through `JSError`.
+[x] 4. Make error behavior non-panicking
+- [x] Replace panic-based conversion paths with error-returning APIs or safe variants.
+- [x] Normalize JS exception reporting through `JSError`.
 
 [ ] 5. Harden promise and microtask execution
 - [ ] Replace busy-spin `Await()` with a host-driven wait strategy.
