@@ -114,6 +114,9 @@ func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*
 	if p == nil {
 		return nil, errors.New("gv8: nil promise")
 	}
+	if !p.valid() {
+		return nil, &JSError{Message: "gv8: value is no longer valid"}
+	}
 
 	pollInterval := options.PollInterval
 	if pollInterval <= 0 {
@@ -121,6 +124,9 @@ func (p *Promise) AwaitWithOptions(ctx context.Context, options AwaitOptions) (*
 	}
 
 	for {
+		if !p.valid() {
+			return nil, &JSError{Message: "gv8: value is no longer valid"}
+		}
 		if p.ctx != nil && p.ctx.iso != nil {
 			p.ctx.iso.PerformMicrotaskCheckpoint()
 		}

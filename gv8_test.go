@@ -648,6 +648,58 @@ func TestConcurrentAccessRequiresExternalSynchronization(t *testing.T) {
 	}
 }
 
+func TestConcurrentObjectAccessRequiresExternalSynchronization(t *testing.T) {
+	prev := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(prev)
+
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	if err := ctx.Bind("block", func(*gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+		close(entered)
+		<-release
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("bind block: %v", err)
+	}
+
+	object, err := ctx.NewObject()
+	if err != nil {
+		t.Fatalf("new object: %v", err)
+	}
+	defer object.Release()
+
+	if err := object.Set("answer", 42); err != nil {
+		t.Fatalf("set answer: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := ctx.RunScript("block()", "block-object.js")
+		done <- err
+	}()
+
+	<-entered
+
+	if _, err := object.Get("answer"); err == nil {
+		t.Fatalf("expected concurrent object access error")
+	} else if !strings.Contains(err.Error(), "externally synchronize access") {
+		t.Fatalf("unexpected concurrent object access error: %v", err)
+	}
+
+	close(release)
+
+	if err := <-done; err != nil {
+		t.Fatalf("unexpected blocking script error: %v", err)
+	}
+}
+
 func TestIsolateTerminateExecution(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	defer runtime.GOMAXPROCS(prev)
@@ -1249,6 +1301,50 @@ func TestPromiseAwaitRejectedReturnsJSError(t *testing.T) {
 	}
 	if jsErr.Message != "promise rejected: boom" {
 		t.Fatalf("unexpected rejection message: %q", jsErr.Message)
+	}
+}
+
+func TestPromiseAwaitFailsWhenContextClosesDuringPendingWork(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+
+	resolver, err := gv8.NewPromiseResolver(ctx)
+	if err != nil {
+		t.Fatalf("new promise resolver: %v", err)
+	}
+
+	promise := resolver.Promise()
+	defer resolver.Release()
+	defer promise.Release()
+
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := promise.Await(context.Background(), func(context.Context) error {
+			time.Sleep(time.Millisecond)
+			return nil
+		})
+		waitDone <- err
+	}()
+
+	time.Sleep(5 * time.Millisecond)
+	ctx.Close()
+
+	select {
+	case err := <-waitDone:
+		if err == nil {
+			t.Fatalf("expected await error after context close")
+		}
+		var jsErr *gv8.JSError
+		if !errors.As(err, &jsErr) {
+			t.Fatalf("expected JSError, got %T", err)
+		}
+		if jsErr.Message != "gv8: value is no longer valid" {
+			t.Fatalf("unexpected await error: %q", jsErr.Message)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for await to fail after context close")
 	}
 }
 
