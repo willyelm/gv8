@@ -1,9 +1,11 @@
 # gv8
 
-`gv8` is a small Go binding for embedding V8.
+`gv8` is a focused V8 embedding layer for Go hosts that need a lean JavaScript
+execution core.
 
-The project stays close to V8's model instead of adding a large Go-specific
-runtime layer. The core API is built around:
+The project stays close to V8's model instead of layering on a large Go-side
+framework. The emphasis is on explicit ownership, tight runtime control, and
+low overhead under server workloads. The core API is built around:
 
 - `Isolate`
 - `Context`
@@ -26,6 +28,26 @@ The intended long-lived embedding surface is:
 - `Promise`
 
 These are the APIs to prefer when building a host runtime.
+
+## Design Direction
+
+`gv8` is shaped for operators and runtime authors who want JavaScript
+execution in-process without surrendering lifecycle control to a broad helper
+framework.
+
+The design priorities are:
+
+- direct mapping to V8 concepts
+- explicit ownership and teardown
+- predictable isolate behavior under load
+- small API surface with low abstraction cost
+
+The design intentionally avoids:
+
+- broad V8 surface parity for its own sake
+- hidden schedulers or event loops
+- large convenience layers that obscure lifecycle boundaries
+- host features that are better owned by the embedding application
 
 ## Convenience APIs
 
@@ -73,6 +95,32 @@ The supported core for that use case is:
 The project does not try to expose the full V8 embedder surface. Features like
 snapshots remain optional and out of scope unless startup latency requirements
 justify the added maintenance and API complexity.
+
+## Operational Contract
+
+The current production contract is intentionally narrow.
+
+- Supported platforms: `darwin/arm64`, `linux/amd64`, `linux/arm64`
+- Ownership model: every handle belongs to one isolate and one context lineage
+- Concurrency model: isolate access is externally synchronized
+- Failure model: APIs returning `error` surface JavaScript exceptions as
+  `JSError`
+- Teardown model: explicit `Close`, `Dispose`, and `Release` calls remain part
+  of normal host ownership
+
+What production support means in this repository:
+
+- the supported platforms build against the bundled native runtime
+- core server-runtime features are covered by dedicated tests
+- isolate misuse and invalid-handle paths fail predictably
+- CI exercises the supported target matrix plus focused leak and stress passes
+
+What remains intentionally out of scope:
+
+- full embedder API coverage
+- inspector-driven developer tooling as a core contract
+- browser-class host facilities
+- large host runtime abstractions above the execution core
 
 ## Error Handling
 
@@ -180,11 +228,6 @@ println(value.Integer())
 ## Bundled Runtime
 
 `gv8` vendors V8 headers, version metadata, and prebuilt runtimes in-module.
-The supported targets are:
-
-- `darwin/arm64`
-- `linux/amd64`
-- `linux/arm64`
 
 Each target ships one runtime:
 

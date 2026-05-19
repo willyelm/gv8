@@ -64,8 +64,8 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Run leak and stress tests separately.
 - [x] Make `make test` self-contained and independent of host cache paths.
 
-[ ] 13. Clarify operational guarantees in the README
-- [ ] State supported platforms.
-- [ ] State the threading model.
-- [ ] State ownership rules for each handle type.
-- [ ] State what production support means and what is intentionally out of scope.
+[x] 13. Clarify operational guarantees in the README
+- [x] State supported platforms.
+- [x] State the threading model.
+- [x] State ownership rules for each handle type.
+- [x] State what production support means and what is intentionally out of scope.
