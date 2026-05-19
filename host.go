@@ -71,6 +71,12 @@ func NewFunction(ctx *Context, fn HostFunction) (*Function, error) {
 
 	callbackID := registerHostFunction(fn)
 	ctx.trackHostFunction(callbackID)
+	release, err := ctx.iso.enter()
+	if err != nil {
+		unregisterHostFunctions([]int{callbackID})
+		return nil, err
+	}
+	defer release()
 	rtn := C.GV8ContextNewFunction(ctx.ptr, C.int(callbackID))
 	value, err := valueResult(ctx, rtn)
 	if err != nil {

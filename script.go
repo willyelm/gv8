@@ -12,6 +12,12 @@ type UnboundScript struct {
 }
 
 func compileUnboundScript(iso *Isolate, source string, origin ScriptOrigin) (*UnboundScript, error) {
+	release, err := iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	csource := C.CString(source)
 	corigin := C.CString(origin.ResourceName)
 	defer C.free(unsafe.Pointer(csource))
@@ -34,6 +40,8 @@ func (s *UnboundScript) Release() {
 	if s == nil || s.ptr == nil {
 		return
 	}
+	release := s.iso.mustEnter()
+	defer release()
 	C.GV8UnboundScriptRelease(s.ptr)
 	s.ptr = nil
 }
@@ -45,6 +53,11 @@ func (s *UnboundScript) Run(ctx *Context) (*Value, error) {
 	if err := ctx.ensureOpen(); err != nil {
 		return nil, err
 	}
+	release, err := ctx.iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	rtn := C.GV8UnboundScriptRun(ctx.ptr, s.ptr)
 	return valueResult(ctx, rtn)
 }

@@ -34,6 +34,12 @@ const (
 )
 
 func compileModule(iso *Isolate, source string, origin ScriptOrigin) (*Module, error) {
+	release, err := iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	csource := C.CString(source)
 	corigin := C.CString(origin.ResourceName)
 	defer C.free(unsafe.Pointer(csource))
@@ -56,6 +62,8 @@ func (m *Module) Release() {
 	if m == nil || m.ptr == nil {
 		return
 	}
+	release := m.iso.mustEnter()
+	defer release()
 	C.GV8ModuleRelease(m.ptr)
 	m.ptr = nil
 }
@@ -67,6 +75,11 @@ func (m *Module) Instantiate(ctx *Context, resolver ModuleResolver) error {
 	if err := ctx.ensureOpen(); err != nil {
 		return err
 	}
+	release, err := ctx.iso.enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	ctx.moduleResolver = resolver
 	rtn := C.GV8ModuleInstantiate(ctx.ptr, m.ptr)
 	if rtn.msg == nil {
@@ -82,6 +95,11 @@ func (m *Module) Evaluate(ctx *Context) (*Value, error) {
 	if err := ctx.ensureOpen(); err != nil {
 		return nil, err
 	}
+	release, err := ctx.iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	rtn := C.GV8ModuleEvaluate(ctx.ptr, m.ptr)
 	return valueResult(ctx, rtn)
 }
@@ -147,6 +165,8 @@ func (m *Module) Namespace(ctx *Context) *Object {
 	if m == nil || m.ptr == nil || ctx == nil || ctx.isClosed() {
 		return nil
 	}
+	release := ctx.iso.mustEnter()
+	defer release()
 	return &Object{Value: newValue(ctx, C.GV8ModuleGetNamespace(ctx.ptr, m.ptr))}
 }
 
@@ -154,6 +174,8 @@ func (m *Module) Status() ModuleStatus {
 	if m == nil || m.ptr == nil {
 		return ModuleStatusUninstantiated
 	}
+	release := m.iso.mustEnter()
+	defer release()
 	return ModuleStatus(C.GV8ModuleGetStatus(m.ptr))
 }
 
@@ -161,6 +183,8 @@ func (m *Module) ScriptID() int {
 	if m == nil || m.ptr == nil {
 		return 0
 	}
+	release := m.iso.mustEnter()
+	defer release()
 	return int(C.GV8ModuleGetScriptID(m.ptr))
 }
 

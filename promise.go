@@ -29,6 +29,11 @@ func NewPromiseResolver(ctx *Context) (*PromiseResolver, error) {
 	if err := ctx.ensureOpen(); err != nil {
 		return nil, err
 	}
+	release, err := ctx.iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	rtn := C.GV8ContextNewPromiseResolver(ctx.ptr)
 	value, err := valueResult(ctx, rtn)
 	if err != nil {
@@ -41,6 +46,8 @@ func (r *PromiseResolver) Promise() *Promise {
 	if r == nil || !r.valid() {
 		return nil
 	}
+	release := r.ctx.iso.mustEnter()
+	defer release()
 	return &Promise{Value: newValue(r.ctx, C.GV8PromiseResolverGetPromise(r.ptr))}
 }
 
@@ -51,6 +58,11 @@ func (r *PromiseResolver) Resolve(value *Value) error {
 	if value == nil || !value.valid() {
 		return &JSError{Message: "gv8: value is no longer valid"}
 	}
+	release, err := r.ctx.iso.enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	return newJSError(C.GV8PromiseResolverResolve(r.ptr, value.ptr))
 }
 
@@ -61,6 +73,11 @@ func (r *PromiseResolver) Reject(value *Value) error {
 	if value == nil || !value.valid() {
 		return &JSError{Message: "gv8: value is no longer valid"}
 	}
+	release, err := r.ctx.iso.enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	return newJSError(C.GV8PromiseResolverReject(r.ptr, value.ptr))
 }
 
@@ -68,6 +85,8 @@ func (p *Promise) State() PromiseState {
 	if p == nil || !p.valid() {
 		return PromisePending
 	}
+	release := p.ctx.iso.mustEnter()
+	defer release()
 	return PromiseState(C.GV8PromiseState(p.ptr))
 }
 
@@ -75,6 +94,8 @@ func (p *Promise) Result() *Value {
 	if p == nil || !p.valid() {
 		return nil
 	}
+	release := p.ctx.iso.mustEnter()
+	defer release()
 	return newValue(p.ctx, C.GV8PromiseResult(p.ptr))
 }
 

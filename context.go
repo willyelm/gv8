@@ -166,6 +166,8 @@ func (c *Context) Global() *Object {
 	if c == nil || c.isClosed() {
 		return nil
 	}
+	release := c.iso.mustEnter()
+	defer release()
 	return &Object{Value: newValue(c, C.GV8ContextGlobal(c.ptr))}
 }
 
@@ -212,6 +214,11 @@ func (c *Context) NewObject() (*Object, error) {
 	if err := c.ensureOpen(); err != nil {
 		return nil, err
 	}
+	release, err := c.iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	rtn := C.GV8ContextNewObject(c.ptr)
 	value, err := valueResult(c, rtn)
 	if err != nil {
@@ -224,6 +231,11 @@ func (c *Context) RunScript(source string, origin string) (*Value, error) {
 	if err := c.ensureOpen(); err != nil {
 		return nil, err
 	}
+	release, err := c.iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	csource := C.CString(source)
 	corigin := C.CString(origin)
