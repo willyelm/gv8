@@ -3,6 +3,7 @@ package gv8_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -451,6 +452,48 @@ func TestRepeatedRunAndCloseCycle(t *testing.T) {
 		ctx.Close()
 		value.Release()
 		iso.Dispose()
+	}
+}
+
+func TestConcurrentAccessRequiresExternalSynchronization(t *testing.T) {
+	prev := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(prev)
+
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	if err := ctx.Bind("block", func(*gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+		close(entered)
+		<-release
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("bind block: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := ctx.RunScript("block()", "block.js")
+		done <- err
+	}()
+
+	<-entered
+
+	if _, err := ctx.RunScript("40 + 2", "concurrent.js"); err == nil {
+		t.Fatalf("expected concurrent access error")
+	} else if !strings.Contains(err.Error(), "externally synchronize access") {
+		t.Fatalf("unexpected concurrent access error: %v", err)
+	}
+
+	close(release)
+
+	if err := <-done; err != nil {
+		t.Fatalf("unexpected blocking script error: %v", err)
 	}
 }
 

@@ -24,6 +24,24 @@ Current support includes:
 - JSON helpers
 - promise resolution and awaiting
 
+## Threading
+
+`gv8` uses an externally synchronized isolate model.
+
+- One isolate may have only one active caller at a time.
+- Reentrant calls on that same thread are allowed so host callbacks can call
+  back into `gv8`.
+- Concurrent use of the same isolate, context, or values from multiple threads
+  is rejected at runtime.
+- Different isolates may be used concurrently.
+
+In practice:
+
+- treat an `Isolate` and everything created from it as a single-threaded unit
+- serialize access in your host runtime
+- expect methods that return `error` to report concurrent access violations
+- expect some non-error convenience methods to panic if you violate the contract
+
 ## Example
 
 ```go

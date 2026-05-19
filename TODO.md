@@ -14,10 +14,10 @@ Production-readiness work for `gv8`, keeping the core intentionally small and fo
 - [x] Ensure context registry and resolver state are fully cleaned on close.
 - [x] Add leak tests for repeated create/destroy cycles.
 
-[ ] 3. Define a strict threading model
-- [ ] Decide whether isolates are thread-affine or externally synchronized.
-- [ ] Enforce the contract in Go with runtime checks.
-- [ ] Document which operations are safe concurrently.
+[x] 3. Define a strict threading model
+- [x] Decide whether isolates are thread-affine or externally synchronized.
+- [x] Enforce the contract in Go with runtime checks.
+- [x] Document which operations are safe concurrently.
 
 [ ] 4. Make error behavior non-panicking
 - [ ] Replace panic-based conversion paths with error-returning APIs or safe variants.
