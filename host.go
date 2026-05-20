@@ -114,6 +114,12 @@ func materializeValue(ctx *Context, value any) (*Value, func(), error) {
 	case uint32:
 		next, err := NewIntegerValue(ctx, int64(v))
 		return next, func() { next.Release() }, err
+	case float64:
+		next, err := NewNumberValue(ctx, v)
+		return next, func() { next.Release() }, err
+	case []byte:
+		next, err := NewUint8ArrayCopy(ctx, v)
+		return next, func() { next.Release() }, err
 	default:
 		return nil, nil, fmt.Errorf("gv8: unsupported value type %T", value)
 	}

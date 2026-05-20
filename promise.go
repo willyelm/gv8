@@ -25,7 +25,6 @@ type PromiseResolver struct {
 	*Value
 }
 
-
 func NewPromiseResolver(ctx *Context) (*PromiseResolver, error) {
 	if err := ctx.ensureOpen(); err != nil {
 		return nil, err
@@ -117,6 +116,9 @@ func (p *Promise) Await(ctx context.Context, pump func(context.Context) error) (
 		}
 		if p.State() != PromisePending {
 			break
+		}
+		if p.ctx != nil && p.ctx.iso != nil && p.ctx.iso.IsExecutionTerminating() {
+			return nil, &JSError{Message: "gv8: execution terminated"}
 		}
 		if ctx != nil {
 			select {

@@ -15,11 +15,13 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 )
 
 type IsolateOptions struct {
 	InitialHeapSizeBytes uint64
 	MaxHeapSizeBytes     uint64
+	Snapshot             Snapshot
 }
 
 type MemoryPressureLevel int
@@ -86,6 +88,8 @@ type Isolate struct {
 	ownerThread uintptr
 	depth       int
 
+	terminating atomic.Bool
+
 	obMu                          sync.RWMutex
 	unhandledPromiseRejectionHook UnhandledPromiseRejectionHandler
 	exceptionHook                 ExceptionHandler
@@ -105,7 +109,17 @@ func NewIsolateWithOptions(options IsolateOptions) *Isolate {
 	initialize()
 	ref := nextIsolateRef()
 	iso := &Isolate{ref: ref}
-	if options.InitialHeapSizeBytes == 0 && options.MaxHeapSizeBytes == 0 {
+	if len(options.Snapshot) > 0 {
+		iso.ptr = C.GV8NewIsolateWithSnapshot(
+			(*C.uint8_t)(unsafe.Pointer(&options.Snapshot[0])),
+			C.int(len(options.Snapshot)),
+			C.uint64_t(options.InitialHeapSizeBytes),
+			C.uint64_t(options.MaxHeapSizeBytes),
+		)
+		if iso.ptr == nil {
+			panic("gv8: invalid snapshot data")
+		}
+	} else if options.InitialHeapSizeBytes == 0 && options.MaxHeapSizeBytes == 0 {
 		iso.ptr = C.GV8NewIsolate()
 	} else {
 		iso.ptr = C.GV8NewIsolateWithHeapLimit(
@@ -142,6 +156,7 @@ func (i *Isolate) TerminateExecution() {
 	if i == nil || i.ptr == nil {
 		return
 	}
+	i.terminating.Store(true)
 	C.GV8IsolateTerminateExecution(i.ptr)
 }
 
@@ -149,13 +164,14 @@ func (i *Isolate) IsExecutionTerminating() bool {
 	if i == nil || i.ptr == nil {
 		return false
 	}
-	return C.GV8IsolateIsExecutionTerminating(i.ptr) != 0
+	return i.terminating.Load()
 }
 
 func (i *Isolate) CancelTerminateExecution() {
 	if i == nil || i.ptr == nil {
 		return
 	}
+	i.terminating.Store(false)
 	C.GV8IsolateCancelTerminateExecution(i.ptr)
 }
 
@@ -390,18 +406,4 @@ func gv8PromiseRejectCallback(isolateRef C.int, event C.int, errorInfo C.GV8RtnE
 		jsErr, _ = err.(*JSError)
 	}
 	iso.noteUnhandledPromiseRejection(PromiseRejectEvent(event), jsErr)
-}
-
-//export gv8ExceptionMessageCallback
-func gv8ExceptionMessageCallback(isolateRef C.int, errorInfo C.GV8RtnError) {
-	iso := getIsolateRef(int(isolateRef))
-	if iso == nil {
-		_ = newJSError(errorInfo)
-		return
-	}
-	var jsErr *JSError
-	if err := newJSError(errorInfo); err != nil {
-		jsErr, _ = err.(*JSError)
-	}
-	iso.noteException(jsErr)
 }
