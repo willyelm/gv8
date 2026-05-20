@@ -4,12 +4,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION_FILE="${ROOT}/internal/v8/VERSION"
 ARGS_DIR="${ROOT}/args"
 GV8_TARGET="${GV8_TARGET:-}"
 SOURCE_ROOT="${ROOT}/.v8/src/v8"
 
-if [ ! -f "${VERSION_FILE}" ]; then
+if [ ! -f "${ROOT}/internal/v8/SOURCE_COMMIT" ]; then
   echo "error: run 'make fetch' first" >&2
   exit 1
 fi
@@ -60,7 +59,7 @@ ensure_worktree() {
   local current_commit
 
   if [ ! -d "${SOURCE_ROOT}/.git" ]; then
-    echo "error: V8 source not found — run 'make fetch' first" >&2
+    echo "error: V8 source not found - run 'make fetch' first" >&2
     exit 1
   fi
 
@@ -89,7 +88,6 @@ ensure_worktree() {
   fi
 }
 
-VERSION="$(cat "${VERSION_FILE}")"
 HOST_OS="$(uname -s)"
 HOST_ARCH="$(uname -m)"
 
@@ -530,6 +528,14 @@ EOF
   fi
 }
 
+_h="${WORKTREE}/include/v8-version.h"
+VERSION="$( \
+  M="$(awk '/^#define V8_MAJOR_VERSION/{print $3}' "$_h")"; \
+  m="$(awk '/^#define V8_MINOR_VERSION/{print $3}' "$_h")"; \
+  b="$(awk '/^#define V8_BUILD_NUMBER/{print $3}' "$_h")"; \
+  p="$(awk '/^#define V8_PATCH_LEVEL/{print $3}' "$_h")"; \
+  echo "${M}.${m}.${b}.${p}" \
+)"
 echo "building bundled V8  platform=${PLATFORM}/${PLATFORM_ARCH}  version=${VERSION}"
 
 if command -v getconf >/dev/null 2>&1 && getconf _NPROCESSORS_ONLN >/dev/null 2>&1; then

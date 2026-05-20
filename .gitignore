@@ -1,4 +1,5 @@
 .DS_Store
 .v8/
 dist/
+memory/
 TODO*.md

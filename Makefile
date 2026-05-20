@@ -11,11 +11,11 @@ test:
 
 test-leak:
 	mkdir -p $(TEST_CACHE_ROOT)/cache $(TEST_CACHE_ROOT)/mod $(TEST_CACHE_ROOT)/tmp
-	$(GO_TEST_ENV) $(GO) test -count=10 -run 'TestContextCloseReleasesHostFunctions|TestContextCloseClearsRegistryAndResolver|TestRepeatedContextLifecycleDoesNotLeakRegistrations' ./...
+	$(GO_TEST_ENV) $(GO) test -count=10 -run 'TestContextCloseReleasesHostFunctions|TestContextCloseClearsRegistryAndResolver|TestRepeatedContextLifecycleDoesNotLeakRegistrations|TestLongLivedIsolateSoak' ./...
 
 test-stress:
 	mkdir -p $(TEST_CACHE_ROOT)/cache $(TEST_CACHE_ROOT)/mod $(TEST_CACHE_ROOT)/tmp
-	$(GO_TEST_ENV) $(GO) test -count=10 -run 'TestRepeatedRunAndCloseCycle|TestConcurrentAccessRequiresExternalSynchronization|TestConcurrentObjectAccessRequiresExternalSynchronization|TestServerRuntimeEssentials' ./...
+	$(GO_TEST_ENV) $(GO) test -count=10 -run 'TestRepeatedRunAndCloseCycle|TestConcurrentAccessRequiresExternalSynchronization|TestConcurrentObjectAccessRequiresExternalSynchronization|TestEmbeddingEssentials|TestHostWorkloadShapeUnderLoad|TestPromiseAwaitTerminationAndReuseStress' ./...
 
 ci-test: test test-leak test-stress
 
@@ -25,7 +25,7 @@ fmt:
 version:
 	$(ROOT)scripts/version.sh
 
-# Fetch V8 source at the version pinned in internal/v8/VERSION.
+# Fetch V8 source at the commit pinned in internal/v8/SOURCE_COMMIT.
 fetch:
 	$(ROOT)scripts/fetch-v8.sh
 
