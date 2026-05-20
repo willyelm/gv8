@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/willyelm/gv8"
 )
@@ -240,7 +241,7 @@ func TestHostCallbackCanReenterIsolateOnSameThread(t *testing.T) {
 	}
 }
 
-func TestServerRuntimeEssentials(t *testing.T) {
+func TestEmbeddingEssentials(t *testing.T) {
 	iso := gv8.NewIsolate()
 	defer iso.Dispose()
 
@@ -265,7 +266,7 @@ func TestServerRuntimeEssentials(t *testing.T) {
 		import { base } from "./static.js";
 
 		const dynamic = await import("./dynamic.js");
-		const payload = JSON.parse('{"tag":"server-runtime","ok":true}');
+		const payload = JSON.parse('{"tag":"embedding","ok":true}');
 		const bytes = new Uint8Array([base, dynamic.extra]);
 
 		export const result = {
@@ -274,7 +275,7 @@ func TestServerRuntimeEssentials(t *testing.T) {
 			bytes,
 		};
 	`, gv8.ScriptOrigin{
-		ResourceName: "server-runtime.js",
+		ResourceName: "embedding.js",
 	})
 	if err != nil {
 		t.Fatalf("compile module: %v", err)
@@ -330,7 +331,7 @@ func TestServerRuntimeEssentials(t *testing.T) {
 		t.Fatalf("get tag: %v", err)
 	}
 	defer tag.Release()
-	if got := mustString(t, tag); got != "server-runtime" {
+	if got := mustString(t, tag); got != "embedding" {
 		t.Fatalf("unexpected tag: %q", got)
 	}
 
@@ -348,7 +349,7 @@ func TestServerRuntimeEssentials(t *testing.T) {
 		t.Fatalf("unexpected bytes: %#v", bytes)
 	}
 
-	jsonValue, err := gv8.JSONParse(ctx, `{"mode":"server-runtime","count":42}`)
+	jsonValue, err := gv8.JSONParse(ctx, `{"mode":"embedding","count":42}`)
 	if err != nil {
 		t.Fatalf("json parse: %v", err)
 	}
@@ -358,7 +359,7 @@ func TestServerRuntimeEssentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json stringify: %v", err)
 	}
-	for _, want := range []string{`"mode":"server-runtime"`, `"count":42`} {
+	for _, want := range []string{`"mode":"embedding"`, `"count":42`} {
 		if !strings.Contains(jsonText, want) {
 			t.Fatalf("stringify missing %s in %s", want, jsonText)
 		}
@@ -394,5 +395,167 @@ func TestServerRuntimeEssentials(t *testing.T) {
 	}
 	if got := mustString(t, awaited); got != "done" {
 		t.Fatalf("unexpected awaited value: %q", got)
+	}
+}
+
+// TestLongLivedIsolateSoak exercises a long-lived isolate across many
+// sequential context cycles. It validates that host function bindings, promise
+// resolution, and context lifecycle do not degrade or leak under repeated use.
+func TestLongLivedIsolateSoak(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	start := time.Now()
+	const cycles = 500
+
+	for i := range cycles {
+		ctx := gv8.NewContext(iso)
+
+		fn, err := gv8.NewFunction(ctx, func(info *gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+			args := info.Args()
+			return gv8.NewIntegerValue(info.Context(), args[0].Integer()+args[1].Integer())
+		})
+		if err != nil {
+			t.Fatalf("cycle %d: new function: %v", i, err)
+		}
+
+		global := ctx.Global()
+		if err := global.Set("add", fn); err != nil {
+			t.Fatalf("cycle %d: set global: %v", i, err)
+		}
+		global.Release()
+
+		scriptResult, err := ctx.RunScript(`add(20, 22)`, "soak.js")
+		if err != nil {
+			t.Fatalf("cycle %d: run script: %v", i, err)
+		}
+		if got := scriptResult.Integer(); got != 42 {
+			t.Fatalf("cycle %d: unexpected script result: %d", i, got)
+		}
+		scriptResult.Release()
+
+		resolver, err := gv8.NewPromiseResolver(ctx)
+		if err != nil {
+			t.Fatalf("cycle %d: new promise resolver: %v", i, err)
+		}
+		v, err := gv8.NewStringValue(ctx, "ok")
+		if err != nil {
+			t.Fatalf("cycle %d: new string: %v", i, err)
+		}
+
+		awaited, err := resolver.Promise().Await(context.Background(), func(context.Context) error {
+			return resolver.Resolve(v)
+		})
+		if err != nil {
+			t.Fatalf("cycle %d: await: %v", i, err)
+		}
+		if got := mustString(t, awaited); got != "ok" {
+			t.Fatalf("cycle %d: unexpected awaited: %q", i, got)
+		}
+
+		awaited.Release()
+		v.Release()
+		resolver.Release()
+		fn.Release()
+		ctx.Close()
+	}
+
+	t.Logf("completed %d request cycles in %s (%.1f req/s)",
+		cycles, time.Since(start).Round(time.Millisecond),
+		float64(cycles)/time.Since(start).Seconds())
+}
+
+// TestHostWorkloadShapeUnderLoad runs a representative embedding pattern:
+// module compilation, host function callbacks, dynamic imports, promise
+// settlement, and binary data across repeated cycles through one isolate.
+func TestHostWorkloadShapeUnderLoad(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	const cycles = 100
+
+	for i := range cycles {
+		ctx := gv8.NewContext(iso)
+
+		hostCalls := 0
+		fn, err := gv8.NewFunction(ctx, func(info *gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+			hostCalls++
+			args := info.Args()
+			return gv8.NewIntegerValue(info.Context(), args[0].Integer()+args[1].Integer())
+		})
+		if err != nil {
+			t.Fatalf("cycle %d: new function: %v", i, err)
+		}
+		global := ctx.Global()
+		if err := global.Set("hostAdd", fn); err != nil {
+			t.Fatalf("cycle %d: set global: %v", i, err)
+		}
+		global.Release()
+
+		resolver := &testResolver{
+			modules: map[string]string{
+				"./lib.js":  `export const base = hostAdd(20, 1);`,
+				"./data.js": `export const extra = 21;`,
+			},
+		}
+
+		mod, err := iso.CompileModule(`
+			import { base } from "./lib.js";
+			const { extra } = await import("./data.js");
+			export const result = base + extra;
+			export const bytes = new Uint8Array([base, extra]);
+		`, gv8.ScriptOrigin{ResourceName: "workload.js"})
+		if err != nil {
+			t.Fatalf("cycle %d: compile: %v", i, err)
+		}
+
+		if err := mod.Instantiate(ctx, resolver); err != nil {
+			t.Fatalf("cycle %d: instantiate: %v", i, err)
+		}
+
+		evalResult, err := mod.Evaluate(ctx)
+		if err != nil {
+			t.Fatalf("cycle %d: evaluate: %v", i, err)
+		}
+		if evalResult != nil && evalResult.IsPromise() {
+			if _, err := evalResult.Promise().Await(context.Background(), nil); err != nil {
+				t.Fatalf("cycle %d: await TLA: %v", i, err)
+			}
+			evalResult.Release()
+		} else if evalResult != nil {
+			evalResult.Release()
+		}
+
+		ns := mod.Namespace(ctx)
+
+		result, err := ns.Get("result")
+		if err != nil {
+			t.Fatalf("cycle %d: get result: %v", i, err)
+		}
+		if got := result.Integer(); got != 42 {
+			t.Fatalf("cycle %d: unexpected result: got %d want 42", i, got)
+		}
+		result.Release()
+
+		bytesVal, err := ns.Get("bytes")
+		if err != nil {
+			t.Fatalf("cycle %d: get bytes: %v", i, err)
+		}
+		b, err := bytesVal.Bytes()
+		if err != nil {
+			t.Fatalf("cycle %d: bytes: %v", i, err)
+		}
+		if len(b) != 2 || b[0] != 21 || b[1] != 21 {
+			t.Fatalf("cycle %d: unexpected bytes: %v", i, b)
+		}
+		bytesVal.Release()
+
+		if hostCalls != 1 {
+			t.Fatalf("cycle %d: unexpected host call count: got %d want 1", i, hostCalls)
+		}
+
+		mod.Release()
+		fn.Release()
+		ctx.Close()
 	}
 }

@@ -188,6 +188,12 @@ func TestValueStringValueReturnsJSError(t *testing.T) {
 		if !errors.As(err, &jsErr) {
 			t.Fatalf("expected JSError, got %T", err)
 		}
+		if extracted, ok := gv8.AsJSError(err); !ok || extracted == nil {
+			t.Fatalf("expected AsJSError to extract JSError")
+		}
+		if !gv8.IsJSError(err) {
+			t.Fatalf("expected IsJSError")
+		}
 	}
 
 	value.Release()
@@ -262,6 +268,103 @@ func TestArrayBufferBytes(t *testing.T) {
 	}
 	if got := string(data); got != "HI" {
 		t.Fatalf("unexpected bytes: %q", got)
+	}
+}
+
+func TestNewArrayBufferCopy(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	source := []byte("gv8")
+	value, err := gv8.NewArrayBufferCopy(ctx, source)
+	if err != nil {
+		t.Fatalf("new array buffer: %v", err)
+	}
+	defer value.Release()
+
+	source[0] = 'x'
+	if !value.IsArrayBuffer() || value.Len() != 3 {
+		t.Fatalf("expected ArrayBuffer length 3")
+	}
+	data, err := value.Bytes()
+	if err != nil {
+		t.Fatalf("array buffer bytes: %v", err)
+	}
+	if got := string(data); got != "gv8" {
+		t.Fatalf("unexpected bytes: %q", got)
+	}
+}
+
+func TestNewUint8ArrayCopy(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	value, err := gv8.NewUint8ArrayCopy(ctx, []byte{40, 2})
+	if err != nil {
+		t.Fatalf("new uint8 array: %v", err)
+	}
+	defer value.Release()
+
+	if !value.IsUint8Array() || value.Len() != 2 {
+		t.Fatalf("expected Uint8Array length 2")
+	}
+
+	global := ctx.Global()
+	if err := global.Set("bytes", value); err != nil {
+		t.Fatalf("set bytes: %v", err)
+	}
+	global.Release()
+
+	result, err := ctx.RunScript(`bytes[0] + bytes[1]`, "uint8-array-copy.js")
+	if err != nil {
+		t.Fatalf("run script: %v", err)
+	}
+	defer result.Release()
+	if got := result.Integer(); got != 42 {
+		t.Fatalf("unexpected result: got %d want 42", got)
+	}
+}
+
+func TestObjectIndexedPropertiesAndLength(t *testing.T) {
+	iso := gv8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := gv8.NewContext(iso)
+	defer ctx.Close()
+
+	array, err := ctx.NewArray(2)
+	if err != nil {
+		t.Fatalf("new array: %v", err)
+	}
+	defer array.Release()
+
+	if err := array.SetIdx(0, "go"); err != nil {
+		t.Fatalf("set index 0: %v", err)
+	}
+	if err := array.SetIdx(1, "v8"); err != nil {
+		t.Fatalf("set index 1: %v", err)
+	}
+	if array.Len() != 2 {
+		t.Fatalf("unexpected length: got %d want 2", array.Len())
+	}
+
+	item, err := array.GetIdx(1)
+	if err != nil {
+		t.Fatalf("get index: %v", err)
+	}
+	defer item.Release()
+	if got := mustString(t, item); got != "v8" {
+		t.Fatalf("unexpected item: %q", got)
+	}
+
+	if !array.Has("length") || array.Has("missing") {
+		t.Fatalf("unexpected property existence")
 	}
 }
 

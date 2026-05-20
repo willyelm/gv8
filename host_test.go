@@ -185,6 +185,50 @@ func TestHostFunctionCanReturnCallbackArgument(t *testing.T) {
 	}
 }
 
+func TestPersistentFunctionHandle(t *testing.T) {
+	iso := NewIsolate()
+	defer iso.Dispose()
+
+	ctx := NewContext(iso)
+	defer ctx.Close()
+
+	fn, err := NewFunction(ctx, func(info *FunctionCallbackInfo) (*Value, error) {
+		return NewStringValue(info.Context(), "ok")
+	})
+	if err != nil {
+		t.Fatalf("new function: %v", err)
+	}
+	defer fn.Release()
+
+	handle, err := NewGlobalFunction(fn)
+	if err != nil {
+		t.Fatalf("new persistent function: %v", err)
+	}
+	defer handle.Release()
+
+	cached, err := handle.Function(ctx)
+	if err != nil {
+		t.Fatalf("persistent function: %v", err)
+	}
+	defer cached.Release()
+
+	global := ctx.Global()
+	result, err := cached.Call(global)
+	global.Release()
+	if err != nil {
+		t.Fatalf("call persistent function: %v", err)
+	}
+	defer result.Release()
+
+	got, err := result.StringValue()
+	if err != nil {
+		t.Fatalf("string value: %v", err)
+	}
+	if got != "ok" {
+		t.Fatalf("unexpected result: %q", got)
+	}
+}
+
 func TestMixedLifecycleStressDoesNotLeakOrBreakTeardown(t *testing.T) {
 	beforeHostFns := hostFunctionCount()
 	beforeContexts := contextCount()
