@@ -1,5 +1,5 @@
-// Package gv8 is a focused V8 embedding layer for Go hosts that need fast,
-// predictable JavaScript execution without carrying a large runtime framework.
+// Package gv8 is a focused V8 embedding layer for Go hosts that need direct,
+// predictable JavaScript execution through V8.
 //
 // The package is intentionally built around a narrow core surface:
 //
@@ -17,9 +17,8 @@
 // The design goal is a compact execution core with explicit control over
 // ownership, scheduling, and teardown. It favors low-overhead primitives over
 // convenience abstractions that hide lifecycle costs, and it is suitable for
-// custom execution environments, plugin systems, and server-side JavaScript
-// workflows. JavaScript running inside V8 also has access to V8's standard
-// WebAssembly APIs.
+// custom execution environments and plugin systems. JavaScript running inside
+// V8 also has access to V8's standard WebAssembly APIs.
 //
 // Prefer the explicit APIs that make ownership and lifecycle visible:
 //
@@ -29,8 +28,8 @@
 //   - Module / UnboundScript -> Release
 //
 // Convenience helpers remain available, but they are secondary to the explicit
-// APIs and should not be the foundation of a long-lived host runtime design.
+// APIs and should not define host execution policy.
 //
-// Intentionally out of scope: a broad batteries-included runtime, wide V8 API
-// parity, or heavy host abstractions that trade clarity for surface area.
+// Intentionally out of scope: broad runtime behavior, wide V8 API parity, or
+// heavy host abstractions that trade clarity for surface area.
 package gv8

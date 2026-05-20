@@ -1,13 +1,16 @@
 # gv8
 
+[![ci](https://github.com/willyelm/gv8/actions/workflows/ci.yml/badge.svg?style=flat)](https://github.com/willyelm/gv8/actions/workflows/ci.yml)
+[![V8 14.8.178.21](https://img.shields.io/badge/V8-14.8.178.21%20%40%20e38030f-blue?style=flat)](https://chromium.googlesource.com/v8/v8.git/+/e38030f4228c8d1405fe105fc5feaa5173559e25)
+
 `gv8` embeds the V8 JavaScript engine in Go.
 
 It exposes a small Go-facing API for running modern JavaScript inside V8 while
-staying close to V8's own execution model. 
+staying close to V8's own execution model.
 
-The goal is to be a compact, predictable execution for Go
-hosts that need JavaScript and V8, not a batteries-included runtime. `gv8` 
-is built to keep V8 embedding in Go small, direct, and efficient.
+The goal is a compact, predictable binding for Go hosts that want to execute
+JavaScript through V8 directly. `gv8` keeps embedding small, explicit, and
+efficient.
 
 ## What It Supports
 
@@ -17,7 +20,9 @@ is built to keep V8 embedding in Go small, direct, and efficient.
 - promises and microtask pumping
 - host function bindings
 - JSON helpers
-- byte access for `ArrayBuffer` and typed arrays
+- `ArrayBuffer` and typed array byte movement
+- V8 snapshot creation and isolate creation from snapshots
+- persistent handles for long-lived values and functions
 - JavaScript-hosted WebAssembly execution through V8's standard `WebAssembly` APIs
 - execution termination, heap limits, and memory pressure signals
 - lightweight observability for exceptions, promise rejection, and module resolution failures
@@ -25,9 +30,8 @@ is built to keep V8 embedding in Go small, direct, and efficient.
 ## Good Fits
 
 - custom execution environments
-- application runtimes
 - plugin systems
-- server-side JavaScript workflows
+- Go applications that need direct V8 execution
 
 ## Design Goals
 
@@ -35,8 +39,8 @@ is built to keep V8 embedding in Go small, direct, and efficient.
 - keep ownership explicit
 - keep isolate behavior predictable under load
 - keep the API surface compact
-- keep runtime overhead low
-- make common embedder work cheaper without absorbing host semantics
+- keep binding overhead low
+- expose V8 concepts without absorbing host semantics
 
 ## Core API
 
@@ -59,6 +63,10 @@ remain for ergonomics, but they are secondary to the ownership-first path.
 - Reentrant calls on that same thread are allowed.
 - Different isolates may run concurrently.
 - Every handle belongs to one isolate and one context lineage.
+- Persistent handles keep V8 values alive, but they still belong to their
+  original context lineage.
+- Snapshot data must come from `gv8`'s snapshot builder or another trusted V8
+  source built for the same V8 version.
 - `Close`, `Dispose`, and `Release` are part of normal ownership.
 - APIs returning `error` surface JavaScript exceptions as `JSError`.
 
@@ -67,18 +75,18 @@ single-threaded unit and serialize access in the host.
 
 ## Runtime Scope
 
-`gv8` is intentionally narrow. It focuses on the execution primitives needed to
-run JavaScript from Go with explicit host control:
+`gv8` is intentionally narrow. It focuses on direct V8 execution primitives:
 
 - ES module execution
 - resolver-driven loading
 - host callbacks
 - promise integration
 - execution control
+- snapshot creation and loading
 - JavaScript-driven WebAssembly execution
 
-It does not try to provide full V8 surface parity, a browser-style host, or a
-large batteries-included runtime abstraction above the execution core.
+It does not try to provide full V8 surface parity, a browser-style host, or
+application runtime behavior above V8.
 
 ## Example
 
@@ -323,13 +331,10 @@ iso.SetModuleResolutionFailureHandler(func(specifier, referrer string, err error
 
 ### Bytes And Typed Arrays
 
-`gv8` can read bytes from `ArrayBuffer` values and typed array views.
+`gv8` can move bytes through V8 `ArrayBuffer` and typed array values.
 
 ```go
-value, err := ctx.RunScript(`
-	const bytes = new Uint8Array([72, 73]);
-	bytes.buffer;
-`, "array-buffer.js")
+value, err := gv8.NewUint8ArrayCopy(ctx, []byte("HI"))
 if err != nil {
 	panic(err)
 }
@@ -339,6 +344,54 @@ data, err := value.Bytes()
 if err != nil {
 	panic(err)
 }
+```
+
+### Snapshots
+
+Snapshots expose V8's startup snapshot mechanism directly. `gv8` does not
+decide what to preload; it only builds and consumes V8 snapshot data.
+
+```go
+builder := gv8.NewSnapshotBuilder()
+defer builder.Release()
+
+if err := builder.RunScript(`globalThis.answer = 42`, gv8.ScriptOrigin{
+	ResourceName: "snapshot.js",
+}); err != nil {
+	panic(err)
+}
+
+snapshot, err := builder.Build()
+if err != nil {
+	panic(err)
+}
+
+iso := gv8.NewIsolateWithOptions(gv8.IsolateOptions{
+	Snapshot: snapshot,
+})
+defer iso.Dispose()
+```
+
+### Persistent Handles
+
+Use persistent handles for V8 values that must outlive a temporary Go wrapper.
+They do not change ownership rules: the value still belongs to its original
+context and isolate.
+
+```go
+fn, err := gv8.NewFunction(ctx, func(info *gv8.FunctionCallbackInfo) (*gv8.Value, error) {
+	return gv8.NewStringValue(info.Context(), "ok")
+})
+if err != nil {
+	panic(err)
+}
+defer fn.Release()
+
+handle, err := gv8.NewGlobalFunction(fn)
+if err != nil {
+	panic(err)
+}
+defer handle.Release()
 ```
 
 ### WebAssembly
@@ -382,7 +435,7 @@ Runtime artifacts:
 
 ## Maintenance
 
-`internal/v8/VERSION` is the source of truth for the bundled V8 version.
+`internal/v8/SOURCE_COMMIT` is the source of truth for the bundled V8 source.
 
 Maintainer flow:
 
