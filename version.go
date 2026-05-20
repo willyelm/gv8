@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-//go:embed internal/v8/VERSION
-var bundledV8Version string
+//go:embed internal/v8/SOURCE_COMMIT
+var bundledV8Commit string
 
 func Version() string {
-	return strings.TrimSpace(bundledV8Version)
+	return strings.TrimSpace(bundledV8Commit)
 }
