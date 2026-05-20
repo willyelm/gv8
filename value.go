@@ -200,6 +200,7 @@ func (v *Value) IsUint8ClampedArray() bool {
 	return C.GV8ValueIsUint8ClampedArray(v.ptr) != 0
 }
 
+// Bytes copies byte data out of ArrayBuffer and ArrayBufferView values.
 func (v *Value) Bytes() ([]byte, error) {
 	if !v.valid() {
 		return nil, invalidValueError()
@@ -218,6 +219,16 @@ func (v *Value) Bytes() ([]byte, error) {
 	}
 	defer C.free(unsafe.Pointer(rtn.data))
 	return C.GoBytes(unsafe.Pointer(rtn.data), C.int(rtn.length)), nil
+}
+
+// Len returns the JavaScript length for array-like values.
+func (v *Value) Len() uint32 {
+	if !v.valid() {
+		return 0
+	}
+	release := v.ctx.iso.mustEnter()
+	defer release()
+	return uint32(C.GV8ValueLen(v.ptr))
 }
 
 func (v *Value) Object() *Object {
@@ -241,6 +252,7 @@ func (v *Value) Promise() *Promise {
 	return &Promise{Value: v}
 }
 
+// Object wraps a JavaScript object value.
 type Object struct {
 	*Value
 }
@@ -274,6 +286,26 @@ func (o *Object) GetIdx(index uint32) (*Value, error) {
 	return valueResult(o.ctx, rtn)
 }
 
+// Has reports whether the object has a property named name.
+func (o *Object) Has(name string) bool {
+	if o == nil || !o.valid() {
+		return false
+	}
+	release := o.ctx.iso.mustEnter()
+	defer release()
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+	return C.GV8ObjectHas(o.ptr, cname) != 0
+}
+
+// Len returns the JavaScript length for array-like objects.
+func (o *Object) Len() uint32 {
+	if o == nil || !o.valid() {
+		return 0
+	}
+	return o.Value.Len()
+}
+
 func (o *Object) Set(name string, value any) error {
 	if o == nil || !o.valid() {
 		return invalidValueError()
@@ -294,6 +326,26 @@ func (o *Object) Set(name string, value any) error {
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
 	return newJSError(C.GV8ObjectSet(o.ptr, cname, prop.ptr))
+}
+
+// SetIdx sets an indexed property on the object.
+func (o *Object) SetIdx(index uint32, value any) error {
+	if o == nil || !o.valid() {
+		return invalidValueError()
+	}
+	release, err := o.ctx.iso.enter()
+	if err != nil {
+		return err
+	}
+	defer release()
+	prop, cleanup, err := materializeValue(o.ctx, value)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return err
+	}
+	return newJSError(C.GV8ObjectSetIdx(o.ptr, C.uint32_t(index), prop.ptr))
 }
 
 func (o *Object) CallMethod(name string, args ...any) (*Value, error) {

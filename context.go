@@ -242,6 +242,24 @@ func (c *Context) NewObject() (*Object, error) {
 	return value.Object(), nil
 }
 
+// NewArray allocates a JavaScript Array in the context.
+func (c *Context) NewArray(length uint32) (*Object, error) {
+	if err := c.ensureOpen(); err != nil {
+		return nil, err
+	}
+	release, err := c.iso.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	rtn := C.GV8ContextNewArray(c.ptr, C.uint32_t(length))
+	value, err := valueResult(c, rtn)
+	if err != nil {
+		return nil, err
+	}
+	return value.Object(), nil
+}
+
 // RunScript compiles and executes source in the context.
 func (c *Context) RunScript(source string, origin string) (*Value, error) {
 	if err := c.ensureOpen(); err != nil {
