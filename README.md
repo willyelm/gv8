@@ -1,7 +1,7 @@
 # gv8
 
-[![ci](https://github.com/willyelm/gv8/actions/workflows/ci.yml/badge.svg?style=flat)](https://github.com/willyelm/gv8/actions/workflows/ci.yml)
-[![V8 14.8.178.21](https://img.shields.io/badge/V8-14.8.178.21%20%40%20e38030f-blue?style=flat)](https://chromium.googlesource.com/v8/v8.git/+/e38030f4228c8d1405fe105fc5feaa5173559e25)
+[![ci](https://img.shields.io/github/actions/workflow/status/willyelm/gv8/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/willyelm/gv8/actions/workflows/ci.yml)
+[![V8 14.8.178.21](https://img.shields.io/badge/V8-14.8.178.21%20%40%20e38030f-blue?style=flat-square)](https://chromium.googlesource.com/v8/v8.git/+/e38030f4228c8d1405fe105fc5feaa5173559e25)
 
 `gv8` embeds the V8 JavaScript engine in Go.
 
