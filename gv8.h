@@ -3,10 +3,10 @@
 #ifndef GV8_H
 #define GV8_H
 
-
 #ifdef __cplusplus
 #include "libplatform/libplatform.h"
 #include "v8.h"
+#include "v8-snapshot.h"
 
 typedef v8::Isolate* GV8IsolatePtr;
 extern "C" {
@@ -22,6 +22,7 @@ typedef struct gv8_value* GV8ValuePtr;
 typedef struct gv8_unbound_script* GV8UnboundScriptPtr;
 typedef struct gv8_module* GV8ModulePtr;
 typedef struct gv8_promise_resolver* GV8PromiseResolverPtr;
+typedef struct gv8_snapshot_builder* GV8SnapshotBuilderPtr;
 
 typedef struct {
   const char* msg;
@@ -92,6 +93,10 @@ extern void GV8Init();
 extern GV8IsolatePtr GV8NewIsolate();
 extern GV8IsolatePtr GV8NewIsolateWithHeapLimit(uint64_t initial_heap_size,
                                                 uint64_t max_heap_size);
+extern GV8IsolatePtr GV8NewIsolateWithSnapshot(const uint8_t* data,
+                                               int length,
+                                               uint64_t initial_heap_size,
+                                               uint64_t max_heap_size);
 extern void GV8IsolateSetObserverRef(GV8IsolatePtr iso, int ref);
 extern void GV8IsolateDispose(GV8IsolatePtr iso);
 extern void GV8IsolatePerformMicrotaskCheckpoint(GV8IsolatePtr iso);
@@ -106,6 +111,7 @@ extern GV8ContextPtr GV8NewContext(GV8IsolatePtr iso, int ref);
 extern void GV8ContextDispose(GV8ContextPtr ctx);
 extern GV8ValuePtr GV8ContextGlobal(GV8ContextPtr ctx);
 extern GV8RtnValue GV8ContextNewObject(GV8ContextPtr ctx);
+extern GV8RtnValue GV8ContextNewArray(GV8ContextPtr ctx, uint32_t length);
 extern GV8RtnValue GV8ContextNewFunction(GV8ContextPtr ctx, int callback_id);
 extern GV8RtnValue GV8ContextNewPromiseResolver(GV8ContextPtr ctx);
 extern GV8RtnValue GV8ContextRunScript(GV8ContextPtr ctx,
@@ -138,9 +144,16 @@ extern int GV8ModuleGetScriptID(GV8ModulePtr module);
 extern GV8RtnValue GV8NewString(GV8ContextPtr ctx, const char* value, int length);
 extern GV8RtnValue GV8NewBoolean(GV8ContextPtr ctx, int value);
 extern GV8RtnValue GV8NewInteger(GV8ContextPtr ctx, int64_t value);
+extern GV8RtnValue GV8NewNumber(GV8ContextPtr ctx, double value);
 extern GV8RtnValue GV8NewNull(GV8ContextPtr ctx);
 extern GV8RtnValue GV8NewUndefined(GV8ContextPtr ctx);
 extern GV8RtnValue GV8NewError(GV8ContextPtr ctx, const char* value, int length);
+extern GV8RtnValue GV8NewArrayBufferCopy(GV8ContextPtr ctx,
+                                          const uint8_t* data,
+                                          int length);
+extern GV8RtnValue GV8NewUint8ArrayCopy(GV8ContextPtr ctx,
+                                         const uint8_t* data,
+                                         int length);
 extern void GV8ValueRelease(GV8ValuePtr value);
 extern GV8ValuePtr GV8ValueRetain(GV8ValuePtr value);
 extern GV8RtnString GV8ValueToString(GV8ValuePtr value);
@@ -159,9 +172,14 @@ extern int GV8ValueIsUint8Array(GV8ValuePtr value);
 extern int GV8ValueIsInt8Array(GV8ValuePtr value);
 extern int GV8ValueIsUint8ClampedArray(GV8ValuePtr value);
 extern GV8RtnBytes GV8ValueBytes(GV8ValuePtr value);
+extern uint32_t GV8ValueLen(GV8ValuePtr value);
 extern GV8RtnValue GV8ObjectGet(GV8ValuePtr value, const char* key);
 extern GV8RtnValue GV8ObjectGetIdx(GV8ValuePtr value, uint32_t index);
+extern int GV8ObjectHas(GV8ValuePtr value, const char* key);
 extern GV8RtnError GV8ObjectSet(GV8ValuePtr value, const char* key, GV8ValuePtr prop);
+extern GV8RtnError GV8ObjectSetIdx(GV8ValuePtr value,
+                                   uint32_t index,
+                                   GV8ValuePtr prop);
 extern GV8RtnValue GV8ValueCall(GV8ValuePtr value,
                                 GV8ValuePtr recv,
                                 int argc,
@@ -178,6 +196,15 @@ extern GV8RtnError GV8PromiseResolverReject(GV8ValuePtr value, GV8ValuePtr resul
 extern GV8RtnString GV8JSONStringify(GV8ContextPtr ctx, GV8ValuePtr value);
 extern GV8RtnValue GV8JSONParse(GV8ContextPtr ctx, const char* value, int length);
 
+extern GV8SnapshotBuilderPtr GV8NewSnapshotBuilder();
+extern void GV8SnapshotBuilderRelease(GV8SnapshotBuilderPtr builder);
+extern GV8RtnError GV8SnapshotBuilderRunScript(GV8SnapshotBuilderPtr builder,
+                                               const char* source,
+                                               const char* resource_name,
+                                               int line_offset,
+                                               int column_offset);
+extern GV8RtnBytes GV8SnapshotBuilderBuild(GV8SnapshotBuilderPtr builder);
+
 extern GV8ResolvedModule gv8ResolveModuleCallback(int ctx_ref,
                                                   char* specifier,
                                                   GV8ModulePtr referrer);
@@ -193,7 +220,6 @@ extern GV8CallbackResult gv8FunctionCallback(int ctx_ref,
 extern void gv8PromiseRejectCallback(int isolate_ref,
                                      int event,
                                      GV8RtnError error);
-extern void gv8ExceptionMessageCallback(int isolate_ref, GV8RtnError error);
 
 #ifdef __cplusplus
 }

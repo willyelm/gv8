@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -23,6 +24,8 @@ struct gv8_ctx {
   int ref;
   std::unordered_map<long, gv8_value*> values;
   long next_value_id;
+  StartupData* snapshot_blob;
+  char* snapshot_data;
 };
 
 struct gv8_value {
@@ -40,6 +43,13 @@ struct gv8_unbound_script {
 struct gv8_module {
   Isolate* iso;
   Persistent<Module> ptr;
+};
+
+struct gv8_snapshot_builder {
+  SnapshotCreator* creator;
+  Isolate* iso;
+  Persistent<Context> ctx;
+  bool built;
 };
 
 Local<Value> NewError(Isolate* iso, Local<Context> ctx, const std::string& msg) {
@@ -80,6 +90,25 @@ const char* CopyString(String::Utf8Value& value) {
 
 static inline gv8_ctx* internalContext(Isolate* iso) {
   return static_cast<gv8_ctx*>(iso->GetData(0));
+}
+
+bool SnapshotDataIsValid(const char* data, int length) {
+  if (data == nullptr || length < 8) {
+    return false;
+  }
+
+  // V8 checks this field before StartupData::IsValid(). Reject bad input here
+  // so invalid host data never reaches a fatal V8 DCHECK path.
+  uint32_t rehashability = 0;
+  memcpy(&rehashability, data + 4, sizeof(rehashability));
+  if (rehashability != 0 && rehashability != 1) {
+    return false;
+  }
+
+  StartupData snapshot = {};
+  snapshot.data = data;
+  snapshot.raw_size = length;
+  return snapshot.IsValid();
 }
 
 gv8_value* trackValue(gv8_ctx* ctx, gv8_value* value) {
@@ -224,6 +253,47 @@ ScriptOrigin MakeOrigin(Isolate* iso,
   Local<Context> local_ctx = ctx_ptr->ptr.Get(iso); \
   Context::Scope context_scope(local_ctx);
 
+MaybeLocal<Promise> DynamicImportCallback(Local<Context> context,
+                                          Local<Data> host_defined_options,
+                                          Local<Value> resource_name,
+                                          Local<String> specifier,
+                                          Local<FixedArray> import_attributes);
+void OnPromiseReject(PromiseRejectMessage message);
+
+void ConfigureHeap(Isolate::CreateParams* params,
+                   uint64_t initial_heap_size,
+                   uint64_t max_heap_size) {
+  if (initial_heap_size > 0 || max_heap_size > 0) {
+    params->constraints.ConfigureDefaultsFromHeapSize(
+        static_cast<size_t>(initial_heap_size), static_cast<size_t>(max_heap_size));
+  }
+}
+
+void InitializeGV8Isolate(Isolate* iso, bool create_internal_context) {
+  iso->SetHostImportModuleDynamicallyCallback(DynamicImportCallback);
+  ISO_SCOPE(iso)
+
+  gv8_ctx* internal = new gv8_ctx;
+  internal->iso = iso;
+  internal->ref = 0;
+  internal->next_value_id = 0;
+  internal->snapshot_blob = nullptr;
+  internal->snapshot_data = nullptr;
+  if (create_internal_context) {
+    internal->ptr.Reset(iso, Context::New(iso));
+  }
+  iso->SetData(0, internal);
+  iso->SetPromiseRejectCallback(OnPromiseReject);
+}
+
+Local<Context> InternalCompileContext(Isolate* iso) {
+  gv8_ctx* internal = internalContext(iso);
+  if (internal->ptr.IsEmpty()) {
+    internal->ptr.Reset(iso, Context::New(iso));
+  }
+  return internal->ptr.Get(iso);
+}
+
 MaybeLocal<Module> ResolveModuleCallback(Local<Context> context,
                                          Local<String> specifier,
                                          Local<FixedArray>,
@@ -334,22 +404,6 @@ void OnPromiseReject(PromiseRejectMessage message) {
                            error);
 }
 
-void ExceptionMessageCallback(Local<Message> message, Local<Value> data) {
-  Isolate* iso = Isolate::GetCurrent();
-  int ref = 0;
-  if (!data.IsEmpty() && data->IsInt32()) {
-    ref = data.As<Int32>()->Value();
-  }
-  if (ref == 0) {
-    return;
-  }
-
-  HandleScope handle_scope(iso);
-  Local<Context> ctx = iso->GetEnteredOrMicrotaskContext();
-  GV8RtnError error = ErrorFromMessage(iso, ctx, message, Local<Value>());
-  gv8ExceptionMessageCallback(ref, error);
-}
-
 extern "C" {
 
 void GV8Init() {
@@ -364,16 +418,7 @@ GV8IsolatePtr GV8NewIsolate() {
   Isolate::CreateParams params;
   params.array_buffer_allocator = default_allocator;
   Isolate* iso = Isolate::New(params);
-  iso->SetHostImportModuleDynamicallyCallback(DynamicImportCallback);
-  ISO_SCOPE(iso)
-
-  gv8_ctx* internal = new gv8_ctx;
-  internal->iso = iso;
-  internal->ref = 0;
-  internal->next_value_id = 0;
-  internal->ptr.Reset(iso, Context::New(iso));
-  iso->SetData(0, internal);
-  iso->SetPromiseRejectCallback(OnPromiseReject);
+  InitializeGV8Isolate(iso, true);
   return iso;
 }
 
@@ -381,21 +426,47 @@ GV8IsolatePtr GV8NewIsolateWithHeapLimit(uint64_t initial_heap_size,
                                          uint64_t max_heap_size) {
   Isolate::CreateParams params;
   params.array_buffer_allocator = default_allocator;
-  if (initial_heap_size > 0 || max_heap_size > 0) {
-    params.constraints.ConfigureDefaultsFromHeapSize(
-        static_cast<size_t>(initial_heap_size), static_cast<size_t>(max_heap_size));
-  }
+  ConfigureHeap(&params, initial_heap_size, max_heap_size);
   Isolate* iso = Isolate::New(params);
-  iso->SetHostImportModuleDynamicallyCallback(DynamicImportCallback);
-  ISO_SCOPE(iso)
+  InitializeGV8Isolate(iso, true);
+  return iso;
+}
 
-  gv8_ctx* internal = new gv8_ctx;
-  internal->iso = iso;
-  internal->ref = 0;
-  internal->next_value_id = 0;
-  internal->ptr.Reset(iso, Context::New(iso));
-  iso->SetData(0, internal);
-  iso->SetPromiseRejectCallback(OnPromiseReject);
+GV8IsolatePtr GV8NewIsolateWithSnapshot(const uint8_t* data,
+                                        int length,
+                                        uint64_t initial_heap_size,
+                                        uint64_t max_heap_size) {
+  Isolate::CreateParams params;
+  params.array_buffer_allocator = default_allocator;
+  ConfigureHeap(&params, initial_heap_size, max_heap_size);
+  StartupData* snapshot = nullptr;
+  char* snapshot_data = nullptr;
+  if (data != nullptr && length > 0) {
+    const char* source_data = reinterpret_cast<const char*>(data);
+    if (!SnapshotDataIsValid(source_data, length)) {
+      return nullptr;
+    }
+
+    snapshot_data = new char[length];
+    memcpy(snapshot_data, data, length);
+
+    snapshot = new StartupData;
+    snapshot->data = snapshot_data;
+    snapshot->raw_size = length;
+    params.snapshot_blob = snapshot;
+  }
+
+  Isolate* iso = Isolate::New(params);
+  if (iso == nullptr) {
+    delete snapshot;
+    delete[] snapshot_data;
+    return nullptr;
+  }
+
+  InitializeGV8Isolate(iso, false);
+  gv8_ctx* internal = internalContext(iso);
+  internal->snapshot_blob = snapshot;
+  internal->snapshot_data = snapshot_data;
   return iso;
 }
 
@@ -410,8 +481,13 @@ void GV8IsolateDispose(GV8IsolatePtr iso) {
   if (iso == nullptr) {
     return;
   }
-  GV8ContextDispose(internalContext(iso));
+  gv8_ctx* internal = internalContext(iso);
+  StartupData* snapshot_blob = internal->snapshot_blob;
+  char* snapshot_data = internal->snapshot_data;
+  GV8ContextDispose(internal);
   iso->Dispose();
+  delete snapshot_blob;
+  delete[] snapshot_data;
 }
 
 void GV8IsolatePerformMicrotaskCheckpoint(GV8IsolatePtr iso) {
@@ -508,6 +584,8 @@ GV8ContextPtr GV8NewContext(GV8IsolatePtr iso, int ref) {
   wrap->iso = iso;
   wrap->ref = ref;
   wrap->next_value_id = 0;
+  wrap->snapshot_blob = nullptr;
+  wrap->snapshot_data = nullptr;
   wrap->ptr.Reset(iso, ctx);
   ctx->SetEmbedderDataV2(2, External::New(iso, wrap, kContextWrapTag));
   return wrap;
@@ -535,6 +613,13 @@ GV8RtnValue GV8ContextNewObject(GV8ContextPtr ctx_ptr) {
   CTX_SCOPE(ctx_ptr)
   GV8RtnValue rtn = {};
   rtn.value = wrapValue(ctx_ptr, iso, Object::New(iso));
+  return rtn;
+}
+
+GV8RtnValue GV8ContextNewArray(GV8ContextPtr ctx_ptr, uint32_t length) {
+  CTX_SCOPE(ctx_ptr)
+  GV8RtnValue rtn = {};
+  rtn.value = wrapValue(ctx_ptr, iso, Array::New(iso, static_cast<int>(length)));
   return rtn;
 }
 
@@ -605,8 +690,7 @@ GV8RtnUnboundScript GV8CompileUnboundScript(GV8IsolatePtr iso,
   ISO_SCOPE(iso)
   GV8RtnUnboundScript rtn = {};
 
-  gv8_ctx* internal = internalContext(iso);
-  Local<Context> local_ctx = internal->ptr.Get(iso);
+  Local<Context> local_ctx = InternalCompileContext(iso);
   Context::Scope context_scope(local_ctx);
   TryCatch try_catch(iso);
 
@@ -663,8 +747,7 @@ GV8RtnModule GV8CompileModule(GV8IsolatePtr iso,
   ISO_SCOPE(iso)
   GV8RtnModule rtn = {};
 
-  gv8_ctx* internal = internalContext(iso);
-  Local<Context> local_ctx = internal->ptr.Get(iso);
+  Local<Context> local_ctx = InternalCompileContext(iso);
   Context::Scope context_scope(local_ctx);
   TryCatch try_catch(iso);
 
@@ -775,6 +858,13 @@ GV8RtnValue GV8NewInteger(GV8ContextPtr ctx_ptr, int64_t value) {
   return rtn;
 }
 
+GV8RtnValue GV8NewNumber(GV8ContextPtr ctx_ptr, double value) {
+  CTX_SCOPE(ctx_ptr)
+  GV8RtnValue rtn = {};
+  rtn.value = wrapValue(ctx_ptr, iso, Number::New(iso, value));
+  return rtn;
+}
+
 GV8RtnValue GV8NewNull(GV8ContextPtr ctx_ptr) {
   CTX_SCOPE(ctx_ptr)
   GV8RtnValue rtn = {};
@@ -797,6 +887,40 @@ GV8RtnValue GV8NewError(GV8ContextPtr ctx_ptr, const char* value, int length) {
   return rtn;
 }
 
+GV8RtnValue GV8NewArrayBufferCopy(GV8ContextPtr ctx_ptr,
+                                  const uint8_t* data,
+                                  int length) {
+  CTX_SCOPE(ctx_ptr)
+  GV8RtnValue rtn = {};
+
+  size_t size = length > 0 ? static_cast<size_t>(length) : 0;
+  std::unique_ptr<BackingStore> store = ArrayBuffer::NewBackingStore(iso, size);
+  if (size > 0 && data != nullptr) {
+    memcpy(store->Data(), data, size);
+  }
+  Local<ArrayBuffer> buffer = ArrayBuffer::New(iso, std::move(store));
+  rtn.value = wrapValue(ctx_ptr, iso, buffer);
+  return rtn;
+}
+
+GV8RtnValue GV8NewUint8ArrayCopy(GV8ContextPtr ctx_ptr,
+                                 const uint8_t* data,
+                                 int length) {
+  CTX_SCOPE(ctx_ptr)
+  GV8RtnValue rtn = {};
+
+  size_t size = length > 0 ? static_cast<size_t>(length) : 0;
+  std::unique_ptr<BackingStore> store = ArrayBuffer::NewBackingStore(iso, size);
+  if (size > 0 && data != nullptr) {
+    memcpy(store->Data(), data, size);
+  }
+  Local<ArrayBuffer> buffer = ArrayBuffer::New(iso, std::move(store));
+  Local<Uint8Array> view =
+      Uint8Array::New(buffer, 0, size);
+  rtn.value = wrapValue(ctx_ptr, iso, view);
+  return rtn;
+}
+
 void GV8ValueRelease(GV8ValuePtr value) {
   if (value == nullptr) {
     return;
@@ -813,7 +937,11 @@ GV8ValuePtr GV8ValueRetain(GV8ValuePtr value) {
   if (value == nullptr) {
     return nullptr;
   }
-  return wrapValue(value->ctx, value->iso, value->ptr.Get(value->iso));
+  Isolate* iso = value->iso;
+  ISO_SCOPE(iso)
+  Local<Context> local_ctx = value->ctx->ptr.Get(iso);
+  Context::Scope context_scope(local_ctx);
+  return wrapValue(value->ctx, iso, value->ptr.Get(iso));
 }
 
 GV8RtnString GV8ValueToString(GV8ValuePtr value_ptr) {
@@ -963,6 +1091,40 @@ GV8RtnBytes GV8ValueBytes(GV8ValuePtr value_ptr) {
   return rtn;
 }
 
+uint32_t GV8ValueLen(GV8ValuePtr value_ptr) {
+  if (value_ptr == nullptr) {
+    return 0;
+  }
+  Isolate* iso = value_ptr->iso;
+  ISO_SCOPE(iso)
+  Local<Context> local_ctx = value_ptr->ctx->ptr.Get(iso);
+  Context::Scope context_scope(local_ctx);
+  Local<Value> value = value_ptr->ptr.Get(iso);
+
+  if (value->IsArray()) {
+    return value.As<Array>()->Length();
+  }
+  if (value->IsArrayBuffer()) {
+    return static_cast<uint32_t>(value.As<ArrayBuffer>()->ByteLength());
+  }
+  if (value->IsArrayBufferView()) {
+    return static_cast<uint32_t>(value.As<ArrayBufferView>()->ByteLength());
+  }
+  if (value->IsString()) {
+    return static_cast<uint32_t>(value.As<String>()->Length());
+  }
+  if (value->IsObject()) {
+    Local<String> key =
+        String::NewFromUtf8(iso, "length", NewStringType::kNormal)
+            .ToLocalChecked();
+    Local<Value> length_value;
+    if (value.As<Object>()->Get(local_ctx, key).ToLocal(&length_value)) {
+      return length_value->Uint32Value(local_ctx).FromMaybe(0);
+    }
+  }
+  return 0;
+}
+
 GV8RtnValue GV8ObjectGet(GV8ValuePtr value_ptr, const char* key) {
   Isolate* iso = value_ptr->iso;
   ISO_SCOPE(iso)
@@ -1005,6 +1167,19 @@ GV8RtnValue GV8ObjectGetIdx(GV8ValuePtr value_ptr, uint32_t index) {
   return rtn;
 }
 
+int GV8ObjectHas(GV8ValuePtr value_ptr, const char* key) {
+  Isolate* iso = value_ptr->iso;
+  ISO_SCOPE(iso)
+
+  Local<Context> local_ctx = value_ptr->ctx->ptr.Get(iso);
+  Context::Scope context_scope(local_ctx);
+  Local<Object> object = value_ptr->ptr.Get(iso).As<Object>();
+  Local<String> prop =
+      String::NewFromUtf8(iso, key, NewStringType::kNormal).ToLocalChecked();
+
+  return object->Has(local_ctx, prop).FromMaybe(false) ? 1 : 0;
+}
+
 GV8RtnError GV8ObjectSet(GV8ValuePtr value_ptr, const char* key, GV8ValuePtr prop_ptr) {
   Isolate* iso = value_ptr->iso;
   ISO_SCOPE(iso)
@@ -1017,6 +1192,23 @@ GV8RtnError GV8ObjectSet(GV8ValuePtr value_ptr, const char* key, GV8ValuePtr pro
       String::NewFromUtf8(iso, key, NewStringType::kNormal).ToLocalChecked();
 
   if (object->Set(local_ctx, prop, prop_ptr->ptr.Get(iso)).IsNothing()) {
+    return ExceptionError(try_catch, iso, local_ctx);
+  }
+  return EmptyError();
+}
+
+GV8RtnError GV8ObjectSetIdx(GV8ValuePtr value_ptr,
+                            uint32_t index,
+                            GV8ValuePtr prop_ptr) {
+  Isolate* iso = value_ptr->iso;
+  ISO_SCOPE(iso)
+  TryCatch try_catch(iso);
+
+  Local<Context> local_ctx = value_ptr->ctx->ptr.Get(iso);
+  Context::Scope context_scope(local_ctx);
+  Local<Object> object = value_ptr->ptr.Get(iso).As<Object>();
+
+  if (object->Set(local_ctx, index, prop_ptr->ptr.Get(iso)).IsNothing()) {
     return ExceptionError(try_catch, iso, local_ctx);
   }
   return EmptyError();
@@ -1149,6 +1341,115 @@ GV8RtnValue GV8JSONParse(GV8ContextPtr ctx_ptr, const char* value, int length) {
   }
 
   rtn.value = wrapValue(ctx_ptr, iso, result);
+  return rtn;
+}
+
+GV8SnapshotBuilderPtr GV8NewSnapshotBuilder() {
+  Isolate::CreateParams params;
+  params.array_buffer_allocator = default_allocator;
+
+  gv8_snapshot_builder* builder = new gv8_snapshot_builder;
+  builder->creator = new SnapshotCreator(params);
+  builder->iso = builder->creator->GetIsolate();
+  builder->built = false;
+
+  {
+    Locker locker(builder->iso);
+    Isolate::Scope isolate_scope(builder->iso);
+    HandleScope handle_scope(builder->iso);
+    Local<Context> ctx = Context::New(builder->iso);
+    builder->ctx.Reset(builder->iso, ctx);
+  }
+
+  return builder;
+}
+
+void GV8SnapshotBuilderRelease(GV8SnapshotBuilderPtr builder) {
+  if (builder == nullptr) {
+    return;
+  }
+  if (builder->iso != nullptr) {
+    Locker locker(builder->iso);
+    Isolate::Scope isolate_scope(builder->iso);
+    builder->ctx.Reset();
+  }
+  delete builder->creator;
+  delete builder;
+}
+
+GV8RtnError GV8SnapshotBuilderRunScript(GV8SnapshotBuilderPtr builder,
+                                        const char* source,
+                                        const char* resource_name,
+                                        int line_offset,
+                                        int column_offset) {
+  if (builder == nullptr || builder->built) {
+    GV8RtnError err = EmptyError();
+    err.msg = CopyString("gv8: snapshot builder is no longer valid");
+    return err;
+  }
+
+  Isolate* iso = builder->iso;
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
+  HandleScope handle_scope(iso);
+  TryCatch try_catch(iso);
+  Local<Context> local_ctx = builder->ctx.Get(iso);
+  Context::Scope context_scope(local_ctx);
+
+  Local<String> src =
+      String::NewFromUtf8(iso, source, NewStringType::kNormal).ToLocalChecked();
+  ScriptOrigin origin =
+      MakeOrigin(iso, resource_name, line_offset, column_offset, false);
+  ScriptCompiler::Source script_source(src, origin);
+
+  Local<Script> script;
+  if (!ScriptCompiler::Compile(local_ctx, &script_source).ToLocal(&script)) {
+    return ExceptionError(try_catch, iso, local_ctx);
+  }
+
+  Local<Value> result;
+  if (!script->Run(local_ctx).ToLocal(&result)) {
+    return ExceptionError(try_catch, iso, local_ctx);
+  }
+
+  return EmptyError();
+}
+
+GV8RtnBytes GV8SnapshotBuilderBuild(GV8SnapshotBuilderPtr builder) {
+  GV8RtnBytes rtn = {};
+  if (builder == nullptr || builder->built) {
+    rtn.error.msg = CopyString("gv8: snapshot builder is no longer valid");
+    return rtn;
+  }
+
+  Isolate* iso = builder->iso;
+  {
+    Locker locker(iso);
+    Isolate::Scope isolate_scope(iso);
+    HandleScope handle_scope(iso);
+    Local<Context> local_ctx = builder->ctx.Get(iso);
+    builder->creator->SetDefaultContext(local_ctx);
+    builder->ctx.Reset();
+  }
+
+  StartupData blob =
+      builder->creator->CreateBlob(SnapshotCreator::FunctionCodeHandling::kClear);
+  builder->built = true;
+  if (blob.data == nullptr || blob.raw_size <= 0) {
+    rtn.error.msg = CopyString("gv8: snapshot creation failed");
+    return rtn;
+  }
+  if (!SnapshotDataIsValid(blob.data, blob.raw_size)) {
+    delete[] blob.data;
+    rtn.error.msg = CopyString("gv8: invalid snapshot data");
+    return rtn;
+  }
+
+  uint8_t* copy = static_cast<uint8_t*>(malloc(blob.raw_size));
+  memcpy(copy, blob.data, blob.raw_size);
+  delete[] blob.data;
+  rtn.data = copy;
+  rtn.length = blob.raw_size;
   return rtn;
 }
 
